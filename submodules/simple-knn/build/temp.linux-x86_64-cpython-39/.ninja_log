@@ -1,0 +1,7 @@
+# ninja log v5
+0	11759	1721275644441009869	/data2/zrd/project/S3Gaussian/submodules/simple-knn/build/temp.linux-x86_64-cpython-39/simple_knn.o	ce2ab0d3ed1c6557
+0	18468	1721275651152940075	/data2/zrd/project/S3Gaussian/submodules/simple-knn/build/temp.linux-x86_64-cpython-39/ext.o	8fd61e7e4c6a0726
+0	55716	1721275688380552952	/data2/zrd/project/S3Gaussian/submodules/simple-knn/build/temp.linux-x86_64-cpython-39/spatial.o	85cd8c74088e137c
+38	13923	1722068431923885242	/data2/zrd/project/S3Gaussian/submodules/simple-knn/build/temp.linux-x86_64-cpython-39/simple_knn.o	cdb2710bc087782b
+37	19728	1722068437731839176	/data2/zrd/project/S3Gaussian/submodules/simple-knn/build/temp.linux-x86_64-cpython-39/ext.o	39bd25bbf9f37b45
+38	53652	1722068471639569835	/data2/zrd/project/S3Gaussian/submodules/simple-knn/build/temp.linux-x86_64-cpython-39/spatial.o	3321961fa637f3d

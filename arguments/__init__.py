@@ -63,14 +63,14 @@ class ModelParams(ParamGroup):
         self.start_time = 0 # now hard-coded
         self.end_time = 49
         self.original_start_time = 0 # now hard-coded
-        self.num_objs = 256 
+        # self.num_objs = 256 
         self.num_pts = 1500000 
         # mask loading options
         self.load_sky_mask = False
         self.load_panoptic_mask = False
         self.load_sam_mask = False
         self.load_dynamic_mask = True
-        self.load_feat_map = True
+        self.load_feat_map = False
         # waymo
         self.n_views = 100 
         self.random_init = False
@@ -147,10 +147,10 @@ class OptimizationParams(ParamGroup):
         
         self.scale_ratio = 1.0 #   global-scale = local-norm-scale * voxel_size * scale_ratio
         # feat
-        self.include_feature = True
-        self.language_feature_lr = 0.0025 # TODO: update
-        self.feat_dim = 8 #12  #  recomplie-cuda   SET DISTUTILS_USE_SDK=1
-        self.feat_conv_lr = 0.0001 
+        # self.include_feature = True
+        # self.language_feature_lr = 0.0025 # TODO: update
+        # self.feat_dim = 8 #12  #  recomplie-cuda   SET DISTUTILS_USE_SDK=1
+        # self.feat_conv_lr = 0.0001 
 
         self.lambda_feat = 0.001
         self.dx_reg = False
@@ -226,7 +226,7 @@ class ModelHiddenParams(ParamGroup):
         self.no_dr=True
         self.no_do=True
         self.no_dshs=False
-        self.feat_head=True
+        self.feat_head=False
         self.empty_voxel=False
         self.grid_pe=0
         self.static_mlp=False

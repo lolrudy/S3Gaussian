@@ -924,7 +924,8 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
             print(f'occ voxel num :{occ_grid.sum()} from {occ_grid.size} of ratio {occ_grid.sum()/occ_grid.size}')
         
         # downsample points
-        points,shs = GridSample3D(points,shs)
+        points,shs = GridSample3D(points, shs)
+        print("grid sampled points: ", points.shape)
 
         if len(points)>num_pts:
             downsampled_indices = np.random.choice(
@@ -932,7 +933,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
             )
             points = points[downsampled_indices]
             shs = shs[downsampled_indices]
-        
+            
         # check
         #voxel_coords = np.floor((points - aabb[0]) / occ_voxel_size).astype(int)
         #occ = occ_grid[voxel_coords[:, 0], voxel_coords[:, 1], voxel_coords[:, 2]]
@@ -1046,9 +1047,9 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
     
     #print("Generating Video Transforms")
     #video_cam_infos = generateCamerasFromTransforms_waymo(test_frames_list, max_time)
-    if not eval:
-        train_cam_infos.extend(test_cam_infos)
-        test_cam_infos = []
+    # if not eval:
+    #     train_cam_infos.extend(test_cam_infos)
+    #     test_cam_infos = []
     nerf_normalization = getNerfppNorm(train_cam_infos)
 
 

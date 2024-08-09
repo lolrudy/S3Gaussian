@@ -430,7 +430,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         
         loss.backward()
         if torch.isnan(loss).any():
-            print("loss is nan,end training, reexecv program now.")
+            print("loss is nan, end training, reexecv program now.")
             os.execv(sys.executable, [sys.executable] + sys.argv)
         viewspace_point_tensor_grad = torch.zeros_like(viewspace_point_tensor)
         for idx in range(0, len(viewspace_point_tensor_list)):
@@ -745,8 +745,13 @@ if __name__ == "__main__":
     parser.add_argument("--prior_checkpoint", type=str, default = None)
     parser.add_argument("--merge", action="store_true", help="merge gaussians")
     parser.add_argument("--prior_checkpoint2", type=str, default = None)
+    parser.add_argument('--no-feat-head', action='store_true', default=False)
     
     args = parser.parse_args(sys.argv[1:])
+    if args.no_feat_head:
+        args.feat_head = False
+        args.load_feat_map = False
+    
     args.save_iterations.append(args.iterations)
     if args.configs:
         import mmcv

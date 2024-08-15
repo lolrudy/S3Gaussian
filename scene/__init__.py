@@ -76,6 +76,8 @@ class Scene:
                                     recompute_occ_grid = args.recompute_occ_grid,
                                     stride = args.stride,
                                     original_start_time = args.original_start_time,
+                                    split_dynamic = args.split_dynamic,
+                                    args = args
                                     )
             dataset_type="waymo"
         else:
@@ -120,7 +122,8 @@ class Scene:
                                                               "iteration_" + str(self.loaded_iter),
                                                               "bg_point_cloud.ply"))
         else:
-            self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent)
+            self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent, dynamic_pcd=scene_info.dynamic_point_cloud,
+                                           road_pcd=scene_info.road_pcd, sky_pcd=scene_info.sky_pcd)
             # for waymo
             if bg_gaussians is not None:
                 self.bg_gaussians.create_from_pcd(scene_info.bg_point_cloud, self.cameras_extent)

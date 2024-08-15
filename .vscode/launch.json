@@ -5,14 +5,43 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "train-022-debug",
+            "name": "train-016-debug",
             "type": "debugpy",
             "request": "launch",
             "program": "train.py",
             "console": "integratedTerminal",
-            "args": "-s data/waymo/processed/dynamic/training/022 --expname waymo --model_path work_dirs/phase1/dynamic/recon/022_debug ${command:pickArgs}",
+            "args": [
+                "-s",
+                "data/waymo/processed/dynamic/training/016",
+                "--expname",
+                "waymo",
+                "--model_path",
+                "work_dirs/phase1/dynamic/recon/016_debug",
+                // "--start_checkpoint",
+                // "work_dirs/phase1/dynamic/recon/016_naive_dynamic_acc01_dploss/chkpnt_fine_30000.pth",
+                "--lambda_dyn_acc",
+                "0.1",
+            ],
             "env": {
-                "CUDA_VISIBLE_DEVICES": "0"
+                "CUDA_VISIBLE_DEVICES": "4"
+            }
+        },
+        {
+            "name": "preprocess-debug",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "preprocess_main.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--data_root",
+                "data/waymo/raw",
+                "--scene_ids",
+                "16",
+                "--target_dir",
+                "data/waymo/processed",
+            ],
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "4"
             }
         }
     ]

@@ -47,7 +47,7 @@ class ParamGroup:
 class ModelParams(ParamGroup): 
     def __init__(self, parser, sentinel=False):
         self.debug_test = False
-        self.sh_degree = 3
+        # self.sh_degree = 3
         self._source_path = ""
         self._model_path = ""
         self._images = "images"
@@ -65,6 +65,7 @@ class ModelParams(ParamGroup):
         self.original_start_time = 0 # now hard-coded
         # self.num_objs = 256 
         self.num_pts = 1500000 
+        self.sky_pts_num = 300000
         # mask loading options
         self.load_sky_mask = False
         self.load_panoptic_mask = False
@@ -82,7 +83,9 @@ class ModelParams(ParamGroup):
         self.save_occ_grid = True
         self.occ_voxel_size = 0.4
         self.recompute_occ_grid = False 
-
+        
+        self.split_dynamic = 1
+        
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):
@@ -104,6 +107,7 @@ class OptimizationParams(ParamGroup):
         
         self.iterations = 50_000 # 30_000
         self.coarse_iterations = 5000
+        self.eval_iterations = 30_000
 
         self.position_lr_init = 0.00016
         self.position_lr_final = 0.0000016
@@ -124,6 +128,7 @@ class OptimizationParams(ParamGroup):
         self.percent_dense = 0.01
         self.lambda_dssim = 0.2
         self.lambda_depth = 0.5
+        self.depth_loss_type = "l2"
         self.densification_interval = 100   # 100
         self.opacity_reset_interval = 3000
         self.pruning_interval = 100
@@ -167,7 +172,10 @@ class OptimizationParams(ParamGroup):
         self.bg_grid_res = 10 #　aabb/grid_res = grid_size
         self.bg_model_lr = 0.0025
         self.custom_xyz_scheduler = False
-                
+        
+        self.lambda_dyn_acc = 0.1
+        self.lambda_flat_reg = 100
+
         # deprecated
         self.densify_from_iter = 500   # 调整至与position_lr_after_iter 一致  # 500
         self.position_lr_after_iter = 500
@@ -231,6 +239,7 @@ class ModelHiddenParams(ParamGroup):
         self.grid_pe=0
         self.static_mlp=False
         self.apply_rotation=False
+        self.sh_degree = 3
 
         
         super().__init__(parser, "ModelHiddenParams")

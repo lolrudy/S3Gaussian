@@ -59,7 +59,7 @@ if __name__ == "__main__":
     """
     parser = argparse.ArgumentParser(description="Data converter arg parser")
     parser.add_argument(
-        "--data_root", type=str, required=True, help="root path of waymo dataset"
+        "--data_root", type=str, default="data/waymo/raw", help="root path of waymo dataset"
     )
     parser.add_argument("--split", type=str, default="training", help="split name")
     parser.add_argument(
@@ -103,6 +103,8 @@ if __name__ == "__main__":
             "calib",
             "pose",
             "dynamic_masks",
+            "bbox"
+            # "panoptic_segs"
         ],
     )
     args = parser.parse_args()

@@ -31,6 +31,9 @@ from multiprocessing import Pool
 from shutil import get_terminal_size
 import matplotlib.cm as cm
 
+from typing import List, Dict, Any
+from scipy.spatial.transform import Rotation as R
+
 class ProgressBar:
     """A progress bar which can print the progress."""
 
@@ -638,7 +641,7 @@ def convert_range_image_to_point_cloud_flow(
     )
     for c in calibrations:
         range_image = range_images[c.name][ri_index]
-        #range_image_flow = range_images_flow[c.name][ri_index]
+        range_image_flow = range_images_flow[c.name][ri_index]
         if len(c.beam_inclinations) == 0:  # pylint: disable=g-explicit-length-test
             beam_inclinations = range_image_utils.compute_inclination(
                 tf.constant([c.beam_inclination_min, c.beam_inclination_max]),
@@ -653,9 +656,9 @@ def convert_range_image_to_point_cloud_flow(
         range_image_tensor = tf.reshape(
             tf.convert_to_tensor(range_image.data), range_image.shape.dims
         )
-        #range_image_flow_tensor = tf.reshape(
-        #    tf.convert_to_tensor(range_image_flow.data), range_image_flow.shape.dims
-        #)
+        range_image_flow_tensor = tf.reshape(
+           tf.convert_to_tensor(range_image_flow.data), range_image_flow.shape.dims
+        )
         pixel_pose_local = None
         frame_pose_local = None
         if c.name == dataset_pb2.LaserName.TOP:
@@ -666,10 +669,10 @@ def convert_range_image_to_point_cloud_flow(
         range_image_intensity = range_image_tensor[..., 1]
         range_image_elongation = range_image_tensor[..., 2]
 
-        #flow_x = range_image_flow_tensor[..., 0]
-        #flow_y = range_image_flow_tensor[..., 1]
-        #flow_z = range_image_flow_tensor[..., 2]
-        #flow_class = range_image_flow_tensor[..., 3]
+        flow_x = range_image_flow_tensor[..., 0]
+        flow_y = range_image_flow_tensor[..., 1]
+        flow_z = range_image_flow_tensor[..., 2]
+        flow_class = range_image_flow_tensor[..., 3]
 
         mask_index = tf.where(range_image_mask)
 
@@ -689,12 +692,12 @@ def convert_range_image_to_point_cloud_flow(
         points_intensity_tensor = tf.gather_nd(range_image_intensity, mask_index)
         points_elongation_tensor = tf.gather_nd(range_image_elongation, mask_index)
 
-        #points_flow_x_tensor = tf.expand_dims(tf.gather_nd(flow_x, mask_index), axis=1)
-        #points_flow_y_tensor = tf.expand_dims(tf.gather_nd(flow_y, mask_index), axis=1)
-        #points_flow_z_tensor = tf.expand_dims(tf.gather_nd(flow_z, mask_index), axis=1)
-        #points_flow_class_tensor = tf.expand_dims(
-        #    tf.gather_nd(flow_class, mask_index), axis=1
-        #)
+        points_flow_x_tensor = tf.expand_dims(tf.gather_nd(flow_x, mask_index), axis=1)
+        points_flow_y_tensor = tf.expand_dims(tf.gather_nd(flow_y, mask_index), axis=1)
+        points_flow_z_tensor = tf.expand_dims(tf.gather_nd(flow_z, mask_index), axis=1)
+        points_flow_class_tensor = tf.expand_dims(
+           tf.gather_nd(flow_class, mask_index), axis=1
+        )
 
         origins.append(origins_tensor.numpy())
         points.append(points_tensor.numpy())
@@ -702,17 +705,17 @@ def convert_range_image_to_point_cloud_flow(
         points_elongation.append(points_elongation_tensor.numpy())
         laser_ids.append(np.full_like(points_intensity_tensor.numpy(), c.name - 1))
 
-        #points_flow.append(
-        #    tf.concat(
-        #        [
-        #            points_flow_x_tensor,
-        #            points_flow_y_tensor,
-        #            points_flow_z_tensor,
-        #            points_flow_class_tensor,
-        #        ],
-        #        axis=-1,
-        #    ).numpy()
-        #)
+        points_flow.append(
+           tf.concat(
+               [
+                   points_flow_x_tensor,
+                   points_flow_y_tensor,
+                   points_flow_z_tensor,
+                   points_flow_class_tensor,
+               ],
+               axis=-1,
+           ).numpy()
+        )
 
     return (
         origins,
@@ -789,6 +792,15 @@ class WaymoProcessor(object):
         ]
         # self.tfrecord_pathnames = sorted(glob(join(self.load_dir, "*.tfrecord")))
         self.create_folder()
+        
+        self.MIN_MOVING_SPEED = 0.2
+        self._box_type_to_str = {
+            label_pb2.Label.Type.TYPE_UNKNOWN: "unknown",
+            label_pb2.Label.Type.TYPE_VEHICLE: "vehicle",
+            label_pb2.Label.Type.TYPE_PEDESTRIAN: "pedestrian",
+            label_pb2.Label.Type.TYPE_SIGN: "sign",
+            label_pb2.Label.Type.TYPE_CYCLIST: "cyclist",
+        }
 
     def convert(self):
         """Convert action."""
@@ -832,10 +844,52 @@ class WaymoProcessor(object):
                 self.save_pose(frame, file_idx, frame_idx)
             if "dynamic_masks" in self.process_keys:
                 self.save_dynamic_mask(frame, file_idx, frame_idx)
+            if "bbox" in self.process_keys:
+                self.save_bbox(frame, file_idx, frame_idx)
             if frame_idx == 0:
                 self.save_interested_labels(frame, file_idx)
 
+    def save_bbox(self, frame, file_idx, frame_idx):
+        """Parse and save the images in jpg format.
 
+        Args:
+            frame (:obj:`Frame`): Open dataset frame proto.
+            file_idx (int): Current file index.
+            frame_idx (int): Current frame index.
+        """
+        bbox_path = (
+                f"{self.save_dir}/{str(file_idx).zfill(3)}/gt_bbox/"
+                + f"{str(frame_idx).zfill(3)}.json"
+            )
+        bbox = self.extract_frame_annotation(frame)
+        with open(bbox_path, 'w') as file:
+            json.dump(bbox, file, indent=4)
+        
+    def extract_frame_annotation(self, frame: dataset_pb2.Frame) -> Dict[str, Any]:
+        pose = np.array(frame.pose.transform).reshape((4, 4))
+        objects = []
+        for label in frame.laser_labels:
+            center_vcs = np.array([label.box.center_x, label.box.center_y, label.box.center_z, 1])
+            center_wcs = pose @ center_vcs
+            heading = label.box.heading
+            rotation_vcs = R.from_euler("xyz", [0, 0, heading], degrees=False).as_matrix()
+            rotation_wcs = pose[:3, :3] @ rotation_vcs
+            rotation_wcs = R.from_matrix(rotation_wcs).as_quat()
+
+            speed = np.sqrt(label.metadata.speed_x**2 + label.metadata.speed_y**2 + label.metadata.speed_z**2)
+
+            objects.append(
+                {
+                    "type": self._box_type_to_str[label.type],
+                    "gid": label.id,
+                    "translation": center_wcs[:3].tolist(),
+                    "size": [label.box.length, label.box.width, label.box.height],
+                    "rotation": [rotation_wcs[3], rotation_wcs[0], rotation_wcs[1], rotation_wcs[2]],
+                    "is_moving": bool(speed > self.MIN_MOVING_SPEED)
+                }
+            )
+
+        return objects
 
     def __len__(self):
         """Length of the filename list."""
@@ -938,7 +992,7 @@ class WaymoProcessor(object):
             return
 
         # collect first return only
-        #range_images_flow, _, _ = parse_range_image_flow_and_camera_projection(frame)
+        range_images_flow, _, _ = parse_range_image_flow_and_camera_projection(frame)
         (
             origins,
             points,
@@ -950,7 +1004,7 @@ class WaymoProcessor(object):
         ) = convert_range_image_to_point_cloud_flow(
             frame,
             range_images,
-            None, #range_images_flow,
+            range_images_flow,
             camera_projections,
             range_image_top_pose,
             ri_index=0,
@@ -969,13 +1023,13 @@ class WaymoProcessor(object):
         #   2: pedestrian, i.e., the point corresponds to a pedestrian label box.
         #   3: sign, i.e., the point corresponds to a sign label box.
         #   4: cyclist, i.e., the point corresponds to a cyclist label box.
-        #flows = np.concatenate(flows, axis=0)
+        flows = np.concatenate(flows, axis=0)
 
         point_cloud = np.column_stack(
             (
                 origins,        # n, 3
                 points,         # n, 3
-                #flows,
+                flows,
                 ground_label,   # n, 1
                 intensity,      # n, 1
                 elongation,     # n, 1
@@ -1252,6 +1306,13 @@ class WaymoProcessor(object):
                     f"{self.save_dir}/{str(i).zfill(3)}/dynamic_masks",
                     exist_ok=True,
                 )
+                
+            if "bbox" in self.process_keys:
+                os.makedirs(
+                    f"{self.save_dir}/{str(i).zfill(3)}/gt_bbox",
+                    exist_ok=True,
+                )
+                
             if "panoptic_segs" in self.process_keys:
                 os.makedirs(
                     f"{self.save_dir}/{str(i).zfill(3)}/semantic_segs",

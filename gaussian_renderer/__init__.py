@@ -20,7 +20,8 @@ from scene.gaussian_model import GaussianModel
 from utils.sh_utils import eval_sh
 from time import time as get_time
 
-def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None, stage="fine",return_decomposition=False,return_dx=False,render_feat=False):
+def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None, 
+           stage="fine",return_decomposition=False,return_dx=False,render_feat=False,render_dyn_acc=False):
     """
     Render the scene. 
     
@@ -81,14 +82,25 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     deformation_point = pc._deformation_table
     if "coarse" in stage:
         means3D_final, scales_final, rotations_final, opacity_final, shs_final = means3D, scales, rotations, opacity, shs
+       
     elif "fine" in stage:
         # time0 = get_time()
         # means3D_deform, scales_deform, rotations_deform, opacity_deform = pc._deformation(means3D[deformation_point], scales[deformation_point], 
         #                                                                  rotations[deformation_point], opacity[deformation_point],
         #                                                                  time[deformation_point])
-        means3D_final, scales_final, rotations_final, opacity_final, shs_final, dx, feat, dshs = pc._deformation(means3D, scales, 
-                                                                 rotations, opacity, shs,
-                                                                 time)
+        means3D_final, scales_final, rotations_final, opacity_final, shs_final = means3D.clone(), scales.clone(), rotations.clone(), opacity.clone(), shs.clone()
+        means3D_deform, scales_deform, rotations_deform, opacity_deform, shs_deform, dx, feat, dshs, ds, dr, do = pc._deformation(means3D[deformation_point], scales[deformation_point], 
+                                                                         rotations[deformation_point], opacity[deformation_point], shs[deformation_point],
+                                                                         time[deformation_point])
+        means3D_final[deformation_point] = means3D_deform
+        scales_final[deformation_point] = scales_deform
+        rotations_final[deformation_point] = rotations_deform
+        opacity_final[deformation_point] = opacity_deform
+        shs_final[deformation_point] = shs_deform
+
+        # means3D_final, scales_final, rotations_final, opacity_final, shs_final, dx, feat, dshs = pc._deformation(means3D, scales, 
+        #                                                          rotations, opacity, shs,
+        #                                                          time)
     else:
         raise NotImplementedError
 
@@ -124,6 +136,14 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     # time3 = get_time()
     if colors_precomp is not None:
         shs_final = None
+        if colors_precomp.shape[0] == deformation_point.sum().item():
+            means3D_final = means3D_final[deformation_point]
+            means2D = means2D[deformation_point]
+            opacity = opacity[deformation_point]
+            scales_final = scales_final[deformation_point]
+            rotations_final = rotations_final[deformation_point]
+            cov3D_precomp = cov3D_precomp[deformation_point] if cov3D_precomp is not None else None
+        
     rendered_image, radii, depth = rasterizer(
         means3D = means3D_final,
         means2D = means2D,
@@ -165,12 +185,12 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         
         result_dict.update({"feat": rendered_image2})
 
-    if return_decomposition and dx is not None:
-        dx_abs = torch.abs(dx) # [N,3]
-        max_values = torch.max(dx_abs, dim=1)[0] # [N]
-        thre = torch.mean(max_values)
+    if return_decomposition:
+        # dx_abs = torch.abs(dx) # [N,3]
+        # max_values = torch.max(dx_abs, dim=1)[0] # [N]
+        # thre = torch.mean(max_values)
         
-        dynamic_mask = max_values > thre
+        dynamic_mask = deformation_point
         # dynamic_points = np.sum(dynamic_mask).item()
         
         rendered_image_d, radii_d, depth_d = rasterizer(
@@ -202,6 +222,20 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
             "depth_s":depth_s,
             "visibility_filter_s" : radii_s > 0,
             })
+        
+    if render_dyn_acc:
+        # dynamic_points = np.sum(dynamic_mask).item()
+        dyn_color = torch.cat([deformation_point, deformation_point ,deformation_point], dim=-1).float()
+        dyn_acc, _, _ = rasterizer(
+            means3D = means3D_final,
+            means2D = means2D,
+            shs = None,
+            colors_precomp = dyn_color, # [N,3]
+            opacities = opacity,
+            scales = scales_final,
+            rotations = rotations_final,
+            cov3D_precomp = cov3D_precomp if cov3D_precomp is not None else None)
+        result_dict['dynamic_acc'] = dyn_acc
         
     if return_dx and "fine" in stage:
         result_dict.update({"dx": dx})

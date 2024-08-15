@@ -78,7 +78,8 @@ def render_pixels(
     pipe,
     compute_metrics: bool = True,
     return_decomposition: bool = True,
-    debug:bool = False
+    debug:bool = False,
+    save_seperate_pcd_path: str = None
 ):
     """
     Render pixel-related outputs from a model.
@@ -97,7 +98,9 @@ def render_pixels(
         bg,
         compute_metrics=compute_metrics,
         return_decomposition=return_decomposition,
-        debug = debug
+        debug = debug,
+        save_seperate_pcd_path=save_seperate_pcd_path
+
     )
     if compute_metrics:
         num_samples = len(viewpoint_stack)
@@ -122,7 +125,7 @@ def render_func(
     return_decomposition:bool = False,
     num_cams: int = 3,
     debug: bool = False,
-    save_seperate_pcd = False
+    save_seperate_pcd_path = None
 ):
     """
     Renders a dataset utilizing a specified render function.
@@ -135,6 +138,7 @@ def render_func(
         render_func: Callable function used for rendering the dataset.
         compute_metrics: Optional; if True, the function will compute and return metrics. Default is False.
     """
+    save_seperate_pcd = save_seperate_pcd_path is not None
     # rgbs
     rgbs, gt_rgbs = [], []
     static_rgbs, dynamic_rgbs = [], []
@@ -182,6 +186,9 @@ def render_func(
             
             if "render_s" in render_pkg:
                 static_rgbs.append(get_numpy(render_pkg["render_s"].permute(1, 2, 0)))
+                static_depth_np = render_pkg["depth_s"].permute(1, 2, 0).cpu().numpy()
+                static_depth_np /= static_depth_np.max()
+                static_depths.append(static_depth_np)
                 visibility_filter_s = render_pkg['visibility_filter_s']
             if "render_d" in render_pkg:
                 # green screen blending for better visualization
@@ -190,6 +197,9 @@ def render_func(
                 dy_rgb = render_pkg["render_d"].permute(1, 2, 0)
                 # dy_rgb = dy_rgb * 0.8 + green_background * 0.2
                 dynamic_rgbs.append(get_numpy(dy_rgb))
+                dynamic_depth_np = render_pkg["depth_d"].permute(1, 2, 0).cpu().numpy()
+                dynamic_depth_np /= dynamic_depth_np.max()
+                dynamic_depths.append(dynamic_depth_np)
                 visibility_filter_d = render_pkg['visibility_filter_d']
             
             # ------------- depth ------------- #
@@ -203,7 +213,7 @@ def render_func(
             # ------------- flow ------------- #
             if "dx" in render_pkg and render_pkg['dx'] is not None:
                 dx = render_pkg['dx']
-                dx = torch.tensor(dx)
+                dx = dx.clone().detach()
                 dx_max = torch.max(dx)
                 dx_min = torch.min(dx)
                 dx_list.append(dx)     
@@ -243,11 +253,7 @@ def render_func(
         if save_seperate_pcd and len(dx_list)>1:    
             # 首先根据visibility_filter 选出所有的可见范围内的点
             # 然后得到dynamic 和 static 的mask，把点保存
-                
-            dynamic_pcd_path = os.path.join('test','dynamic.ply')
-            static_pcd_path = os.path.join('test','static.ply')
-
-            gaussians.save_ply_split(dynamic_pcd_path, static_pcd_path, dx_list, visibility_filter)
+            gaussians.save_ply_split(save_seperate_pcd_path, dx_list, visibility_filter)
 
         if len(dx_list)>1:
             # deformation flow -> forward & backward flow
@@ -316,28 +322,32 @@ def render_func(
         results_dict["static_rgbs"] = static_rgbs
     if len(dynamic_rgbs)>0:
         results_dict["dynamic_rgbs"] = dynamic_rgbs
+    if len(static_depths)>0:
+        results_dict["static_depths"] = static_depths
+    if len(dynamic_depths)>0:
+        results_dict["dynamic_depths"] = dynamic_depths
     if len(sky_masks) > 0:
         results_dict["gt_sky_masks"] = sky_masks
-    if len(pred_dinos) > 0:
-        results_dict["dino_feats"] = pred_dinos
-    if len(gt_dinos) > 0:
-        results_dict["gt_dino_feats"] = gt_dinos
-    if len(pred_dinos_pe_free) > 0:
-        results_dict["dino_feats_pe_free"] = pred_dinos_pe_free
-    if len(pred_dino_pe) > 0:
-        results_dict["dino_pe"] = pred_dino_pe
-    if len(static_dinos) > 0:
-        results_dict["static_dino_feats"] = static_dinos
-    if len(dynamic_dinos) > 0:
-        results_dict["dynamic_dino_feats"] = dynamic_dinos
-    if len(dynamic_dino_on_static_rgbs) > 0:
-        results_dict["dynamic_dino_on_static_rgbs"] = dynamic_dino_on_static_rgbs
-    if len(dynamic_rgb_on_static_dinos) > 0:
-        results_dict["dynamic_rgb_on_static_dinos"] = dynamic_rgb_on_static_dinos
-    if len(shadow_reduced_static_rgbs) > 0:
-        results_dict["shadow_reduced_static_rgbs"] = shadow_reduced_static_rgbs
-    if len(shadow_only_static_rgbs) > 0:
-        results_dict["shadow_only_static_rgbs"] = shadow_only_static_rgbs
+    # if len(pred_dinos) > 0:
+    #     results_dict["dino_feats"] = pred_dinos
+    # if len(gt_dinos) > 0:
+    #     results_dict["gt_dino_feats"] = gt_dinos
+    # if len(pred_dinos_pe_free) > 0:
+    #     results_dict["dino_feats_pe_free"] = pred_dinos_pe_free
+    # if len(pred_dino_pe) > 0:
+    #     results_dict["dino_pe"] = pred_dino_pe
+    # if len(static_dinos) > 0:
+    #     results_dict["static_dino_feats"] = static_dinos
+    # if len(dynamic_dinos) > 0:
+    #     results_dict["dynamic_dino_feats"] = dynamic_dinos
+    # if len(dynamic_dino_on_static_rgbs) > 0:
+    #     results_dict["dynamic_dino_on_static_rgbs"] = dynamic_dino_on_static_rgbs
+    # if len(dynamic_rgb_on_static_dinos) > 0:
+    #     results_dict["dynamic_rgb_on_static_dinos"] = dynamic_rgb_on_static_dinos
+    # if len(shadow_reduced_static_rgbs) > 0:
+    #     results_dict["shadow_reduced_static_rgbs"] = shadow_reduced_static_rgbs
+    # if len(shadow_only_static_rgbs) > 0:
+    #     results_dict["shadow_only_static_rgbs"] = shadow_only_static_rgbs
     if len(forward_flows) > 0:
         results_dict["forward_flows"] = forward_flows
     if len(backward_flows) > 0:

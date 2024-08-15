@@ -53,7 +53,14 @@ def loadCam(args, id, cam_info, resolution_scale):
         sky_mask = PILtoTorch(cam_info.sky_mask, resolution)
     depth_map = None
     if cam_info.depth_map is not None:
-        depth_map = DepthMaptoTorch(cam_info.depth_map)
+        # TODO MANUALLY COMPUTE DEPTH MAP
+        depth_map = cam_info.depth_map
+        depth_map = torch.from_numpy(depth_map)
+        if len(depth_map.shape) == 3:
+            depth_map = depth_map.permute(2, 0, 1)
+        else:
+            depth_map = depth_map.unsqueeze(dim=-1).permute(2, 0, 1)
+        # depth_map = DepthMaptoTorch(cam_info.depth_map)
     semantic_mask = None
     if cam_info.semantic_mask is not None:
         semantic_mask = ObjectPILtoTorch(cam_info.semantic_mask, resolution)

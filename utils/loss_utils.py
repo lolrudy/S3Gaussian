@@ -21,7 +21,7 @@ from torch import Tensor
 def normalize_depth(depth: Tensor, max_depth: float = 80.0):
     return torch.clamp(depth / max_depth, 0.0, 1.0)
 
-def compute_depth(
+def compute_depth_loss(
     loss_type,
     pred_depth: Tensor,
     gt_depth: Tensor,

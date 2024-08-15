@@ -9,6 +9,7 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
+import copy
 import os
 import sys
 from PIL import Image
@@ -20,7 +21,7 @@ import numpy as np
 import json
 from pathlib import Path
 from plyfile import PlyData, PlyElement
-from utils.sh_utils import SH2RGB
+from utils.sh_utils import SH2RGB, RGB2SH
 from scene.gaussian_model import BasicPointCloud
 from tqdm import trange
 from utils.general_utils import PILtoTorch
@@ -31,6 +32,7 @@ from utils.segmentation_utils import get_panoptic_id
 import torch
 from utils.feature_extractor import extract_and_save_features
 from utils.image_utils import get_robust_pca
+from utils.refs import SEG_ID2NAME, SEG_NAME2ID, DYNAMIC_OBJECT_ID, STATIC_OBJECT_ID, VEHICLE_ID, FLAT_ID, THING
 
 class CameraInfo(NamedTuple):
     uid: int
@@ -73,6 +75,9 @@ class SceneInfo(NamedTuple):
     panoptic_id_to_idx: dict = None
     panoptic_object_ids: list = None
     occ_grid: np.array = None
+    dynamic_point_cloud: BasicPointCloud = None
+    road_pcd: BasicPointCloud = None
+    sky_pcd: BasicPointCloud = None
 
 def getNerfppNorm(cam_info):
     def get_center_and_diag(cam_centers):
@@ -442,8 +447,10 @@ def constructCameras_waymo(frames_list, white_background, mapper = {},
         # ------------------
         semantic_mask_path, semantic_mask = frame["semantic_mask_path"], None
         if semantic_mask_path is not None:
-            semantic_mask = np.load(semantic_mask_path)
-            semantic_mask = Image.fromarray(semantic_mask.squeeze(-1))
+            # semantic_mask = np.load(semantic_mask_path)
+            # semantic_mask = Image.fromarray(semantic_mask.squeeze(-1))
+            semantic_mask = cv2.imread(semantic_mask_path, cv2.IMREAD_GRAYSCALE)
+            semantic_mask = Image.fromarray(semantic_mask)
             semantic_mask = semantic_mask.resize(load_size, Image.NEAREST)
             # to numpy
             #semantic_mask = np.array(semantic_mask)#  .unsqueeze(-1)
@@ -453,8 +460,10 @@ def constructCameras_waymo(frames_list, white_background, mapper = {},
         # ------------------
         instance_mask_path, instance_mask = frame["instance_mask_path"], None
         if instance_mask_path is not None:
-            instance_mask = np.load(instance_mask_path)
-            instance_mask = Image.fromarray(instance_mask.squeeze(-1))
+            # instance_mask = np.load(instance_mask_path)
+            # instance_mask = Image.fromarray(instance_mask.squeeze(-1))
+            instance_mask = cv2.imread(instance_mask_path, cv2.IMREAD_GRAYSCALE)
+            instance_mask = Image.fromarray(instance_mask)
             instance_mask = instance_mask.resize(load_size, Image.NEAREST)
             # to numpy
             #instance_mask = np.array(instance_mask) #.unsqueeze(-1)
@@ -600,7 +609,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                   load_intrinsic = False, load_c2w = False,
                   start_time = 0, end_time = -1, num_pts = 5000, 
                   save_occ_grid = False, occ_voxel_size = 0.4, recompute_occ_grid=True,
-                  stride = 10 , original_start_time = 0
+                  stride = 10 , original_start_time = 0, split_dynamic=True, args=None
                   ):
     ORIGINAL_SIZE = [[1280, 1920], [1280, 1920], [1280, 1920], [884, 1920], [884, 1920]]
     OPENCV2DATASET = np.array(
@@ -639,14 +648,17 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
             sky_mask_filepaths.append(os.path.join(data_root, "sky_masks", f"{t:03d}_{cam_idx}.png"))
             #semantic_mask_filepaths.append(os.path.join(data_root, "semantic_masks", f"{t:03d}_{cam_idx}.png"))
             #instance_mask_filepaths.append(os.path.join(data_root, "instance_masks", f"{t:03d}_{cam_idx}.png"))
-            if os.path.exists(os.path.join(data_root, "semantic_segs", f"{t:03d}_{cam_idx}.npy")):
-                semantic_mask_filepaths.append(os.path.join(data_root, "semantic_segs", f"{t:03d}_{cam_idx}.npy"))
-            else:
-                semantic_mask_filepaths.append(None)
-            if os.path.exists(os.path.join(data_root, "instance_segs", f"{t:03d}_{cam_idx}.npy")):
-                instance_mask_filepaths.append(os.path.join(data_root, "instance_segs", f"{t:03d}_{cam_idx}.npy"))
-            else:
-                instance_mask_filepaths.append(None)
+            # if os.path.exists(os.path.join(data_root, "semantic_segs", f"{t:03d}_{cam_idx}.npy")):
+            #     semantic_mask_filepaths.append(os.path.join(data_root, "semantic_segs", f"{t:03d}_{cam_idx}.npy"))
+            # else:
+            #     semantic_mask_filepaths.append(None)
+            # if os.path.exists(os.path.join(data_root, "instance_segs", f"{t:03d}_{cam_idx}.npy")):
+            #     instance_mask_filepaths.append(os.path.join(data_root, "instance_segs", f"{t:03d}_{cam_idx}.npy"))
+            # else:
+            #     instance_mask_filepaths.append(None)
+            if load_panoptic_mask:
+                semantic_mask_filepaths.append(os.path.join(data_root, "panoptic", "semantic_mask", f"{t:03d}_{cam_idx}.png"))
+                instance_mask_filepaths.append(os.path.join(data_root, "panoptic", "instance_mask", f"{t:03d}_{cam_idx}.png"))
             if os.path.exists(os.path.join(data_root, "sam_masks", f"{t:03d}_{cam_idx}.jpg")):
                 sam_mask_filepaths.append(os.path.join(data_root, "sam_masks", f"{t:03d}_{cam_idx}.jpg"))
             if os.path.exists(os.path.join(data_root, "dynamic_masks", f"{t:03d}_{cam_idx}.png")):
@@ -822,7 +834,11 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
     # storePly(ply_path, xyz, SH2RGB(shs) * 255)
     else:
         # load lidar points
-        origins, directions, points, ranges, laser_ids = [], [], [], [], []
+        # origins, directions, points, ranges, laser_ids = [], [], [], [], []
+        points, dynamic_points, dynamic_point_masks = [], [], []
+        thing_point_maps = []
+        sky_points, road_points, vehicle_points = [], [], []
+        shs, dynamic_shs = [], []
         depth_maps = []
         accumulated_num_original_rays = 0
         accumulated_num_rays = 0
@@ -831,8 +847,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                 lidar_filepaths[t],
                 dtype=np.float32,
                 mode="r",
-            ).reshape(-1, 10) 
-            #).reshape(-1, 14)
+            ).reshape(-1, 14)
             original_length = len(lidar_info)
             accumulated_num_original_rays += original_length
             lidar_origins = lidar_info[:, :3]
@@ -855,6 +870,43 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                 + lidar_to_worlds[t][:3, 3:4]
             ).T
             if load_depthmap:
+                # TODO foreground background
+                if split_dynamic:
+                    # dynamic_mask = Image.open(os.path.join(data_root, "dynamic_masks", f"{t:03d}_{cam_idx}.png"))
+                    # dynamic_mask = dynamic_mask.resize(load_size[::-1], Image.NEAREST)
+                    # dynamic_mask = np.array(dynamic_mask) / 255
+                    semantic_mask = Image.open(os.path.join(data_root, "panoptic", "semantic_mask", f"{t:03d}_{cam_idx}.png"))
+                    semantic_mask = semantic_mask.resize(load_size[::-1], Image.NEAREST)
+                    semantic_mask = np.array(semantic_mask)
+                    instance_mask = Image.open(os.path.join(data_root, "panoptic", "instance_mask", f"{t:03d}_{cam_idx}.png"))
+                    instance_mask = instance_mask.resize(load_size[::-1], Image.NEAREST)
+                    instance_mask = np.array(instance_mask)
+
+                    dynamic_mask = np.zeros(load_size)
+                    thing_mask = np.zeros(load_size)
+                    car_id_mask = np.zeros(load_size)
+                    thing_mask[:] = -1
+                    for obj_id in STATIC_OBJECT_ID:
+                        thing_mask[semantic_mask == obj_id] = THING.STATIC_OBJECT
+                    for obj_id in DYNAMIC_OBJECT_ID:
+                        thing_mask[semantic_mask == obj_id] = THING.DYNAMIC_OBJECT
+                        dynamic_mask[semantic_mask == obj_id] = 1
+                    for obj_id in VEHICLE_ID:
+                        thing_mask[semantic_mask == obj_id] = THING.VEHICLE
+                        dynamic_mask[semantic_mask == obj_id] = 1
+                    for obj_id in FLAT_ID:
+                        thing_mask[semantic_mask == obj_id] = THING.ROAD
+                    thing_mask[semantic_mask == SEG_NAME2ID['Sky']] = THING.SKY
+                else:
+                    thing_mask = np.zeros(load_size)
+                    dynamic_mask = np.zeros(load_size)
+                image = Image.open(os.path.join(data_root, "images", f"{t:03d}_{cam_idx}.jpg"))
+                image = image.resize(load_size[::-1], Image.NEAREST)
+                image = np.array(image) / 255
+                dynamic_point_mask = np.zeros([lidar_points.shape[0]])
+                thing_point_map = np.zeros([lidar_points.shape[0]])
+                vis_mask = np.zeros([lidar_points.shape[0]])
+                rgb_point = np.random.random((len(lidar_points), 3))
                 # transform world-lidar to pixel-depth-map
                 for cam_idx in range(len(camera_list)):
                     # world-lidar-pts --> camera-pts : w2c
@@ -868,8 +920,9 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                     pixel_points = (
                         intrinsics[int(len(camera_list))*t + cam_idx] @ cam_points.T
                     ).T
+                    pixel_points_mask1 = pixel_points[:, 2]>0
                     # select points in front of the camera
-                    pixel_points = pixel_points[pixel_points[:, 2]>0]
+                    pixel_points = pixel_points[pixel_points_mask1]
                     # normalize pixel points : (u,v,1)
                     image_points = pixel_points[:, :2] / pixel_points[:, 2:]
                     # filter out points outside the image
@@ -884,31 +937,70 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                     # compute depth map
                     depth_map = np.zeros(load_size)
                     depth_map[image_points[:, 1].astype(np.int32), image_points[:, 0].astype(np.int32)] = pixel_points[:, 2]
+                    # sampling points with smallest distance, since points are sparse, discard this
+                    # depth_sort_idx = np.argsort(pixel_points[:,2])[::-1]
+                    # image_points = image_points[depth_sort_idx]
+                    # pixel_points = pixel_points[depth_sort_idx]
+                    # depth_map[image_points[:, 1].astype(np.int32), image_points[:, 0].astype(np.int32)] = pixel_points[:, 2]
                     depth_maps.append(depth_map)
-            # compute lidar directions
-            lidar_directions = lidar_points - lidar_origins
-            lidar_ranges = np.linalg.norm(lidar_directions, axis=-1, keepdims=True)
-            lidar_directions = lidar_directions / lidar_ranges
-            # time indices as timestamp
-            #lidar_timestamps = np.ones_like(lidar_ranges).squeeze(-1) * t
-            accumulated_num_rays += len(lidar_ranges)
+                    pixel_points_mask1[pixel_points_mask1] = valid_mask
+                    dynamic_point_mask[pixel_points_mask1] += \
+                        dynamic_mask[image_points[:, 1].astype(np.int32), image_points[:, 0].astype(np.int32)]
+                    
+                    rgb_point[pixel_points_mask1, :] = image[image_points[:, 1].astype(np.int32), image_points[:, 0].astype(np.int32)]
+                    vis_mask[pixel_points_mask1] = 1
+                    thing_point_map[pixel_points_mask1] = thing_mask[image_points[:, 1].astype(np.int32), image_points[:, 0].astype(np.int32)]
+                    
+            # # compute lidar directions
+            # lidar_directions = lidar_points - lidar_origins
+            # lidar_ranges = np.linalg.norm(lidar_directions, axis=-1, keepdims=True)
+            # lidar_directions = lidar_directions / lidar_ranges
+            # # time indices as timestamp
+            # #lidar_timestamps = np.ones_like(lidar_ranges).squeeze(-1) * t
+            # accumulated_num_rays += len(lidar_ranges)
 
-            origins.append(lidar_origins)
-            directions.append(lidar_directions)
-            points.append(lidar_points)
-            ranges.append(lidar_ranges)
-            laser_ids.append(lidar_ids)
+            # origins.append(lidar_origins)
+            # directions.append(lidar_directions)
+            # ranges.append(lidar_ranges)
+            # laser_ids.append(lidar_ids)
+            
+            # points.append(lidar_points)
+            # TODO SEPARATE ROAD SKY CAR POINTS
+            sh = RGB2SH(rgb_point)
+            points.append(lidar_points[(vis_mask > 0)])
+            shs.append(sh[(vis_mask > 0)])
+            thing_point_maps.append(thing_point_map[(vis_mask > 0)])
+            # if t % 10 == 0:
+            # dynamic_points.append(lidar_points[dynamic_point_mask > 0])
+            # dynamic_shs.append(sh[dynamic_point_mask > 0])
+            
+
 
         #origins = np.concatenate(origins, axis=0)
         #directions = np.concatenate(directions, axis=0)
-        points = np.concatenate(points, axis=0)
         #ranges = np.concatenate(ranges, axis=0)
         #laser_ids = np.concatenate(laser_ids, axis=0)
-        shs = np.random.random((len(points), 3)) / 255.0
+        points = np.concatenate(points, axis=0)
+        shs = np.concatenate(shs, axis=0)
+        thing_point_maps = np.concatenate(thing_point_maps, axis=0)
         # filter points by cam_aabb 
         cam_aabb_mask = np.all((points >= aabb[0]) & (points <= aabb[1]), axis=-1)
         points = points[cam_aabb_mask]
         shs = shs[cam_aabb_mask]
+        thing_point_maps = thing_point_maps[cam_aabb_mask]
+        points_all = points.copy()
+        shs_all = shs.copy()
+        # static point
+        static_point_maps = (thing_point_maps == THING.STATIC_OBJECT) | (thing_point_maps == THING.ROAD)
+        points = points_all[static_point_maps]
+        shs = shs_all[static_point_maps]
+        static_thing_maps = thing_point_maps[static_point_maps]
+        # dynamic point
+        dynamic_point_maps = (thing_point_maps == THING.DYNAMIC_OBJECT) | (thing_point_maps == THING.VEHICLE)
+        dynamic_points = points_all[dynamic_point_maps]
+        dynamic_shs = shs_all[dynamic_point_maps]
+        dynamic_thing_maps = thing_point_maps[dynamic_point_maps]
+
         # construct occupancy grid to aid densification
         if save_occ_grid:
             #occ_grid_shape = (int(np.ceil((aabb[1, 0] - aabb[0, 0]) / occ_voxel_size)),
@@ -924,8 +1016,8 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
             print(f'occ voxel num :{occ_grid.sum()} from {occ_grid.size} of ratio {occ_grid.sum()/occ_grid.size}')
         
         # downsample points
-        points,shs = GridSample3D(points, shs)
-        print("grid sampled points: ", points.shape)
+        # points,shs = GridSample3D(points, shs)
+        # print("grid sampled points: ", points.shape)
 
         if len(points)>num_pts:
             downsampled_indices = np.random.choice(
@@ -933,6 +1025,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
             )
             points = points[downsampled_indices]
             shs = shs[downsampled_indices]
+            static_thing_maps = static_thing_maps[downsampled_indices]
             
         # check
         #voxel_coords = np.floor((points - aabb[0]) / occ_voxel_size).astype(int)
@@ -962,6 +1055,31 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
             # visualize
             #from utils.general_utils import visualize_points
             #visualize_points(points, fg_aabb_center, fg_aabb_size)
+            
+        if split_dynamic:
+            road_pcd = BasicPointCloud(points=points[static_thing_maps==THING.ROAD], colors=SH2RGB(shs[static_thing_maps==THING.ROAD]), 
+                                       normals=np.zeros((len(points[static_thing_maps==THING.ROAD]), 3)))
+            z_max = xyz_max[2]
+            sky_pts_x_num = int(np.sqrt(args.sky_pts_num))
+            sky_pts_num = sky_pts_x_num ** 2
+            sky_points = np.zeros([sky_pts_num, 3])
+            sky_colors = np.zeros([sky_pts_num, 3])
+            x_sky = np.linspace(xyz_min[0], xyz_max[0], sky_pts_x_num)
+            y_sky = np.linspace(xyz_min[1], xyz_max[1], sky_pts_x_num)
+            xv, yv = np.meshgrid(x_sky, y_sky)
+            sky_points[:, 0] = xv.flatten()
+            sky_points[:, 1] = yv.flatten()
+            sky_points[:, 2] = z_max * 2
+            sky_pcd = BasicPointCloud(points=sky_points, colors=SH2RGB(sky_colors), 
+                                       normals=np.zeros((sky_pts_num, 3)))
+            dynamic_pcd = BasicPointCloud(points=dynamic_points, colors=SH2RGB(dynamic_shs), normals=np.zeros((len(dynamic_points), 3))) 
+            points = points[static_thing_maps==THING.STATIC_OBJECT]
+            shs = shs[static_thing_maps==THING.STATIC_OBJECT]
+        else:
+            dynamic_pcd = None
+            road_pcd = None
+            sky_pcd = None
+            
         # save ply
         ply_path = os.path.join(data_root, "ds-points3d.ply")
         storePly(ply_path, points, SH2RGB(shs) * 255)
@@ -976,6 +1094,9 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
         if load_depthmap:
             assert depth_maps is not None, "should not use random-init-gs, ans set load_depthmap=True"
             depth_maps = np.stack(depth_maps, axis=0)
+            
+       
+            
     # ------------------
     # prepare cam-pose dict
     # ------------------
@@ -1041,9 +1162,10 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
     test_cam_infos = constructCameras_waymo(test_frames_list, white_background, timestamp_mapper,
                                             load_intrinsic=load_intrinsic, load_c2w=load_c2w,start_time=start_time,original_start_time=original_start_time)
     print("Reading Full Transforms")
-    full_cam_infos = constructCameras_waymo(full_frames_list, white_background, timestamp_mapper,
-                                            load_intrinsic=load_intrinsic, load_c2w=load_c2w,start_time=start_time,original_start_time=original_start_time)
-    # full_cam_infos = train_cam_infos
+    # full_cam_infos = constructCameras_waymo(full_frames_list, white_background, timestamp_mapper,
+    #                                         load_intrinsic=load_intrinsic, load_c2w=load_c2w,start_time=start_time,original_start_time=original_start_time)
+    full_cam_infos = copy.copy(train_cam_infos)
+    full_cam_infos.extend(test_cam_infos)
     
     #print("Generating Video Transforms")
     #video_cam_infos = generateCamerasFromTransforms_waymo(test_frames_list, max_time)
@@ -1054,26 +1176,28 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
 
 
     # ------------------
-    # find panoptic-objec numbers
+    # find panoptic-object numbers
     # ------------------
     num_panoptic_objects = 0
     panoptic_object_ids = None
     panoptic_id_to_idx = {}
-    if load_panoptic_mask:
-        panoptic_object_ids_list = []
-        for cam in train_cam_infos+test_cam_infos:
-            if cam.semantic_mask is not None and cam.instance_mask is not None:
-                panoptic_object_ids = get_panoptic_id(cam.semantic_mask, cam.instance_mask).unique()
-                panoptic_object_ids_list.append(panoptic_object_ids)
-        # get unique panoptic_objects_ids
-        panoptic_object_ids = torch.cat(panoptic_object_ids_list).unique().sort()[0].tolist()
-        num_panoptic_objects = len(panoptic_object_ids)
-        # map panoptic_id to idx
-        for idx, panoptic_id in enumerate(panoptic_object_ids):
-            panoptic_id_to_idx[panoptic_id] = idx
+    # if load_panoptic_mask:
+    #     panoptic_object_ids_list = []
+    #     for cam in train_cam_infos+test_cam_infos:
+    #         if cam.semantic_mask is not None and cam.instance_mask is not None:
+    #             panoptic_object_ids = get_panoptic_id(cam.semantic_mask, cam.instance_mask).unique()
+    #             panoptic_object_ids_list.append(panoptic_object_ids)
+    #     # get unique panoptic_objects_ids
+    #     panoptic_object_ids = torch.cat(panoptic_object_ids_list).unique().sort()[0].tolist()
+    #     num_panoptic_objects = len(panoptic_object_ids)
+    #     # map panoptic_id to idx
+    #     for idx, panoptic_id in enumerate(panoptic_object_ids):
+    #         panoptic_id_to_idx[panoptic_id] = idx
 
+    
     scene_info = SceneInfo(point_cloud=pcd,
                            bg_point_cloud=bg_pcd,
+                           dynamic_point_cloud=dynamic_pcd,
                            train_cameras=train_cam_infos,
                            test_cameras=test_cam_infos,
                            full_cameras=full_cam_infos,
@@ -1089,6 +1213,8 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                            panoptic_id_to_idx=panoptic_id_to_idx,
                            # occ grid
                            occ_grid=occ_grid if save_occ_grid else None,
+                           road_pcd = road_pcd,
+                           sky_pcd = sky_pcd
                            )
 
     return scene_info

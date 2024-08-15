@@ -189,7 +189,11 @@ class GaussianModel:
         scales = torch.log(torch.sqrt(dist2))[...,None].repeat(1, 3)
         rots = torch.zeros((fused_point_cloud.shape[0], 4), device="cuda")
         rots[:, 0] = 1
-
+        
+        if dynamic_pcd is not None:
+            flat_mask = (self._thing_map == THING.SKY) | (self._thing_map == THING.ROAD)
+            scales[flat_mask, 2] = -100
+ 
         opacities = inverse_sigmoid(0.1 * torch.ones((fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda"))
 
         self._xyz = nn.Parameter(fused_point_cloud.requires_grad_(True))
@@ -198,6 +202,7 @@ class GaussianModel:
         self._features_dc = nn.Parameter(features[:,:,0:1].transpose(1, 2).contiguous().requires_grad_(True))
         self._features_rest = nn.Parameter(features[:,:,1:].transpose(1, 2).contiguous().requires_grad_(True))
         self._scaling = nn.Parameter(scales.requires_grad_(True))
+            
         self._rotation = nn.Parameter(rots.requires_grad_(True))
         self._opacity = nn.Parameter(opacities.requires_grad_(True))
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
@@ -808,11 +813,11 @@ class GaussianModel:
 
     def compute_flat_regulation(self, ):
         flat_mask = (self._thing_map == THING.ROAD) | (self._thing_map == THING.SKY)
-        rot_flat = self._rotation[flat_mask]
+        rot_flat = self.get_rotation[flat_mask]
         euler_flat = euler_angle_from_quaternion(rot_flat)
-        scale_flat = self._scaling[flat_mask]
+        scale_flat = self.get_scaling[flat_mask]
         rot_reg_loss = torch.abs(euler_flat[:, 0]).mean() + torch.abs(euler_flat[:, 1]).mean()
-        scale_reg_loss = torch.abs(scale_flat[:, 2]).mean()
+        scale_reg_loss = scale_flat[:, 2].mean()
         return rot_reg_loss + scale_reg_loss
 
 

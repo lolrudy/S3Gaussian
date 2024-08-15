@@ -473,8 +473,8 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             # Progress bar
             ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
             ema_psnr_for_log = 0.4 * psnr_ + 0.6 * ema_psnr_for_log
-            if opt.lambda_dyn_acc > 0. and args.split_dynamic:
-                ema_acc_loss_for_log = 0.4 * acc_loss.item() + 0.6 * ema_acc_loss_for_log
+            reg_loss = loss_dict.get('flat_reg_loss', torch.tensor(0))
+            ema_acc_loss_for_log = 0.4 * reg_loss.item() + 0.6 * ema_acc_loss_for_log
             total_point = gaussians._xyz.shape[0]
             if iteration % 100 == 0:
                 # dynamic_points = 0
@@ -491,7 +491,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                     "step": f"{iteration}",
                     "Loss": f"{ema_loss_for_log:.{7}f}",
                     "psnr": f"{psnr_:.{2}f}",
-                    # "acc": f"{ema_acc_loss_for_log:.{7}f}",
+                    "flat": f"{ema_acc_loss_for_log:.{7}f}",
                     "dynamic point": f"{dynamic_points}",
                     # "large motion point": f"{dynamic_points_large_motion}",
                     "point":f"{total_point}",

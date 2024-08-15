@@ -68,7 +68,7 @@ class ModelParams(ParamGroup):
         self.sky_pts_num = 300000
         # mask loading options
         self.load_sky_mask = False
-        self.load_panoptic_mask = False
+        self.load_panoptic_mask = True
         self.load_sam_mask = False
         self.load_dynamic_mask = True
         self.load_feat_map = False
@@ -79,6 +79,7 @@ class ModelParams(ParamGroup):
         self.num_classes = 200
         self.load_intrinsic = False
         self.load_c2w = False
+        self.load_gt_bbox = True
         # occ grid
         self.save_occ_grid = True
         self.occ_voxel_size = 0.4

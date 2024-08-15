@@ -442,31 +442,35 @@ def constructCameras_waymo(frames_list, white_background, mapper = {},
         FovY = fovy
         FovX = fovx
 
+        semantic_mask = frame["semantic_mask"]
+        instance_mask = frame["instance_mask"]
+
         # ------------------
         # load semantic mask
         # ------------------
-        semantic_mask_path, semantic_mask = frame["semantic_mask_path"], None
-        if semantic_mask_path is not None:
-            # semantic_mask = np.load(semantic_mask_path)
-            # semantic_mask = Image.fromarray(semantic_mask.squeeze(-1))
-            semantic_mask = cv2.imread(semantic_mask_path, cv2.IMREAD_GRAYSCALE)
-            semantic_mask = Image.fromarray(semantic_mask)
-            semantic_mask = semantic_mask.resize(load_size, Image.NEAREST)
-            # to numpy
-            #semantic_mask = np.array(semantic_mask)#  .unsqueeze(-1)
+        # semantic_mask_path, semantic_mask = frame["semantic_mask_path"], None
+        # if semantic_mask_path is not None:
+        #     # semantic_mask = np.load(semantic_mask_path)
+        #     # semantic_mask = Image.fromarray(semantic_mask.squeeze(-1))
+        #     semantic_mask = Image.open(semantic_mask_path)
+        #     semantic_mask = semantic_mask.resize(load_size, Image.NEAREST)
+        #     semantic_mask = np.array(semantic_mask)
+                    
+        #     # to numpy
+        #     #semantic_mask = np.array(semantic_mask)#  .unsqueeze(-1)
 
-        # ------------------
-        # load instance mask
-        # ------------------
-        instance_mask_path, instance_mask = frame["instance_mask_path"], None
-        if instance_mask_path is not None:
-            # instance_mask = np.load(instance_mask_path)
-            # instance_mask = Image.fromarray(instance_mask.squeeze(-1))
-            instance_mask = cv2.imread(instance_mask_path, cv2.IMREAD_GRAYSCALE)
-            instance_mask = Image.fromarray(instance_mask)
-            instance_mask = instance_mask.resize(load_size, Image.NEAREST)
-            # to numpy
-            #instance_mask = np.array(instance_mask) #.unsqueeze(-1)
+        # # ------------------
+        # # load instance mask
+        # # ------------------
+        # instance_mask_path, instance_mask = frame["instance_mask_path"], None
+        # if instance_mask_path is not None:
+        #     # instance_mask = np.load(instance_mask_path)
+        #     # instance_mask = Image.fromarray(instance_mask.squeeze(-1))
+        #     instance_mask = Image.open(instance_mask_path)
+        #     instance_mask = instance_mask.resize(load_size, Image.NEAREST)
+        #     instance_mask = np.array(instance_mask)
+        #     # to numpy
+        #     #instance_mask = np.array(instance_mask) #.unsqueeze(-1)
 
         # ------------------
         # load sam mask
@@ -637,10 +641,12 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
     img_filepaths = []
     dynamic_mask_filepaths, sky_mask_filepaths = [], []
     semantic_mask_filepaths, instance_mask_filepaths = [], []
+    semantic_masks, instance_masks = [], []
     sam_mask_filepaths = []
     feat_map_filepaths = []
     dynamic_mask_filepaths = []
     lidar_filepaths = []
+    bbox_filepaths = []
     for t in range(start_time, end_time):
         for cam_idx in camera_list:
             img_filepaths.append(os.path.join(data_root, "images", f"{t:03d}_{cam_idx}.jpg"))
@@ -656,15 +662,16 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
             #     instance_mask_filepaths.append(os.path.join(data_root, "instance_segs", f"{t:03d}_{cam_idx}.npy"))
             # else:
             #     instance_mask_filepaths.append(None)
-            if load_panoptic_mask:
-                semantic_mask_filepaths.append(os.path.join(data_root, "panoptic", "semantic_mask", f"{t:03d}_{cam_idx}.png"))
-                instance_mask_filepaths.append(os.path.join(data_root, "panoptic", "instance_mask", f"{t:03d}_{cam_idx}.png"))
+            # if load_panoptic_mask:
+            #     semantic_mask_filepaths.append(os.path.join(data_root, "panoptic", "semantic_mask", f"{t:03d}_{cam_idx}.png"))
+            #     instance_mask_filepaths.append(os.path.join(data_root, "panoptic", "instance_mask", f"{t:03d}_{cam_idx}.png"))
             if os.path.exists(os.path.join(data_root, "sam_masks", f"{t:03d}_{cam_idx}.jpg")):
                 sam_mask_filepaths.append(os.path.join(data_root, "sam_masks", f"{t:03d}_{cam_idx}.jpg"))
             if os.path.exists(os.path.join(data_root, "dynamic_masks", f"{t:03d}_{cam_idx}.png")):
                 dynamic_mask_filepaths.append(os.path.join(data_root, "dynamic_masks", f"{t:03d}_{cam_idx}.png"))
             if load_feat_map:
                 feat_map_filepaths.append(os.path.join(data_root, "dinov2_vitb14", f"{t:03d}_{cam_idx}.npy"))
+                
         lidar_filepaths.append(os.path.join(data_root, "lidar", f"{t:03d}.bin"))
 
     if load_feat_map:
@@ -871,44 +878,47 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
             ).T
             if load_depthmap:
                 # TODO foreground background
-                if split_dynamic:
-                    # dynamic_mask = Image.open(os.path.join(data_root, "dynamic_masks", f"{t:03d}_{cam_idx}.png"))
-                    # dynamic_mask = dynamic_mask.resize(load_size[::-1], Image.NEAREST)
-                    # dynamic_mask = np.array(dynamic_mask) / 255
-                    semantic_mask = Image.open(os.path.join(data_root, "panoptic", "semantic_mask", f"{t:03d}_{cam_idx}.png"))
-                    semantic_mask = semantic_mask.resize(load_size[::-1], Image.NEAREST)
-                    semantic_mask = np.array(semantic_mask)
-                    instance_mask = Image.open(os.path.join(data_root, "panoptic", "instance_mask", f"{t:03d}_{cam_idx}.png"))
-                    instance_mask = instance_mask.resize(load_size[::-1], Image.NEAREST)
-                    instance_mask = np.array(instance_mask)
-
-                    dynamic_mask = np.zeros(load_size)
-                    thing_mask = np.zeros(load_size)
-                    car_id_mask = np.zeros(load_size)
-                    thing_mask[:] = -1
-                    for obj_id in STATIC_OBJECT_ID:
-                        thing_mask[semantic_mask == obj_id] = THING.STATIC_OBJECT
-                    for obj_id in DYNAMIC_OBJECT_ID:
-                        thing_mask[semantic_mask == obj_id] = THING.DYNAMIC_OBJECT
-                        dynamic_mask[semantic_mask == obj_id] = 1
-                    for obj_id in VEHICLE_ID:
-                        thing_mask[semantic_mask == obj_id] = THING.VEHICLE
-                        dynamic_mask[semantic_mask == obj_id] = 1
-                    for obj_id in FLAT_ID:
-                        thing_mask[semantic_mask == obj_id] = THING.ROAD
-                    thing_mask[semantic_mask == SEG_NAME2ID['Sky']] = THING.SKY
-                else:
-                    thing_mask = np.zeros(load_size)
-                    dynamic_mask = np.zeros(load_size)
-                image = Image.open(os.path.join(data_root, "images", f"{t:03d}_{cam_idx}.jpg"))
-                image = image.resize(load_size[::-1], Image.NEAREST)
-                image = np.array(image) / 255
-                dynamic_point_mask = np.zeros([lidar_points.shape[0]])
-                thing_point_map = np.zeros([lidar_points.shape[0]])
-                vis_mask = np.zeros([lidar_points.shape[0]])
-                rgb_point = np.random.random((len(lidar_points), 3))
                 # transform world-lidar to pixel-depth-map
+                rgb_point = np.random.random((len(lidar_points), 3))
                 for cam_idx in range(len(camera_list)):
+                    if split_dynamic:
+                        # TODO LOAD TRACKING RESULT
+                        # dynamic_mask = Image.open(os.path.join(data_root, "dynamic_masks", f"{t:03d}_{cam_idx}.png"))
+                        # dynamic_mask = dynamic_mask.resize(load_size[::-1], Image.NEAREST)
+                        # dynamic_mask = np.array(dynamic_mask) / 255
+                        semantic_mask_pil = Image.open(os.path.join(data_root, "panoptic", "semantic_mask", f"{t:03d}_{cam_idx}.png"))
+                        semantic_mask_pil = semantic_mask_pil.resize(load_size[::-1], Image.NEAREST)
+                        semantic_mask = np.array(semantic_mask_pil)
+                        instance_mask_pil = Image.open(os.path.join(data_root, "panoptic", "instance_mask", f"{t:03d}_{cam_idx}.png"))
+                        instance_mask_pil = instance_mask_pil.resize(load_size[::-1], Image.NEAREST)
+                        instance_mask = np.array(instance_mask_pil)
+                        semantic_masks.append(semantic_mask_pil)
+                        instance_masks.append(instance_mask_pil)
+                        dynamic_mask = np.zeros(load_size)
+                        thing_mask = np.zeros(load_size)
+                        car_id_mask = np.zeros(load_size)
+                        thing_mask[:] = -1
+                        for obj_id in STATIC_OBJECT_ID:
+                            thing_mask[semantic_mask == obj_id] = THING.STATIC_OBJECT
+                        for obj_id in DYNAMIC_OBJECT_ID:
+                            thing_mask[semantic_mask == obj_id] = THING.DYNAMIC_OBJECT
+                            dynamic_mask[semantic_mask == obj_id] = 1
+                        for obj_id in VEHICLE_ID:
+                            thing_mask[semantic_mask == obj_id] = THING.VEHICLE
+                            dynamic_mask[semantic_mask == obj_id] = 1
+                        for obj_id in FLAT_ID:
+                            thing_mask[semantic_mask == obj_id] = THING.ROAD
+                        thing_mask[semantic_mask == SEG_NAME2ID['Sky']] = THING.SKY
+                    else:
+                        thing_mask = np.zeros(load_size)
+                        dynamic_mask = np.zeros(load_size)
+                    image = Image.open(os.path.join(data_root, "images", f"{t:03d}_{cam_idx}.jpg"))
+                    image = image.resize(load_size[::-1], Image.NEAREST)
+                    image = np.array(image) / 255
+                    dynamic_point_mask = np.zeros([lidar_points.shape[0]])
+                    thing_point_map = np.zeros([lidar_points.shape[0]])
+                    vis_mask = np.zeros([lidar_points.shape[0]])
+                    
                     # world-lidar-pts --> camera-pts : w2c
                     c2w = cam_to_worlds[int(len(camera_list))*t + cam_idx]
                     w2c = np.linalg.inv(c2w)
@@ -1111,8 +1121,8 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                             load_size = [load_size[1], load_size[0]],   # [w, h] for PIL.resize
                             sky_mask_path = sky_mask_filepaths[train_idx[idx]] if load_sky_mask else None,
                             depth_map = depth_maps[train_idx[idx]] if load_depthmap else None,
-                            semantic_mask_path = semantic_mask_filepaths[train_idx[idx]] if load_panoptic_mask else None,
-                            instance_mask_path = instance_mask_filepaths[train_idx[idx]] if load_panoptic_mask else None,
+                            semantic_mask = semantic_masks[train_idx[idx]] if load_panoptic_mask else None,
+                            instance_mask = instance_masks[train_idx[idx]] if load_panoptic_mask else None,
                             sam_mask_path = sam_mask_filepaths[train_idx[idx]] if load_sam_mask else None,
                             feat_map_path = feat_map_filepaths[train_idx[idx]] if load_feat_map else None,
                             dynamic_mask_path = dynamic_mask_filepaths[train_idx[idx]] if load_dynamic_mask else None,
@@ -1126,8 +1136,8 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                             load_size = [load_size[1], load_size[0]],   # [w, h] for PIL.resize
                             sky_mask_path = sky_mask_filepaths[test_idx[idx]] if load_sky_mask else None,
                             depth_map = depth_maps[test_idx[idx]] if load_depthmap else None,
-                            semantic_mask_path = semantic_mask_filepaths[test_idx[idx]] if load_panoptic_mask else None,
-                            instance_mask_path = instance_mask_filepaths[test_idx[idx]] if load_panoptic_mask else None,
+                            semantic_mask = semantic_masks[test_idx[idx]] if load_panoptic_mask else None,
+                            instance_mask = instance_masks[test_idx[idx]] if load_panoptic_mask else None,
                             sam_mask_path = sam_mask_filepaths[test_idx[idx]] if load_sam_mask else None,
                             feat_map_path = feat_map_filepaths[test_idx[idx]] if load_feat_map else None,
                             dynamic_mask_path = dynamic_mask_filepaths[test_idx[idx]] if load_dynamic_mask else None,
@@ -1144,8 +1154,8 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                                 load_size = [load_size[1], load_size[0]],   # [w, h] for PIL.resize
                                 sky_mask_path = sky_mask_filepaths[full_idx[idx]] if load_sky_mask else None,
                                 depth_map = depth_maps[full_idx[idx]] if load_depthmap else None,
-                                semantic_mask_path = semantic_mask_filepaths[full_idx[idx]] if load_panoptic_mask else None,
-                                instance_mask_path = instance_mask_filepaths[full_idx[idx]] if load_panoptic_mask else None,
+                                semantic_mask = semantic_masks[full_idx[idx]] if load_panoptic_mask else None,
+                                instance_mask = instance_masks[full_idx[idx]] if load_panoptic_mask else None,
                                 sam_mask_path = sam_mask_filepaths[full_idx[idx]] if load_sam_mask else None,
                                 feat_map_path = feat_map_filepaths[full_idx[idx]] if load_feat_map else None,
                                 dynamic_mask_path = dynamic_mask_filepaths[full_idx[idx]] if load_dynamic_mask else None,
@@ -1157,10 +1167,12 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
     # ------------------
     print("Reading Training Transforms")
     train_cam_infos = constructCameras_waymo(train_frames_list, white_background, timestamp_mapper, 
-                                             load_intrinsic=load_intrinsic, load_c2w=load_c2w,start_time=start_time,original_start_time=original_start_time)
+                                             load_intrinsic=load_intrinsic, load_c2w=load_c2w,start_time=start_time,
+                                             original_start_time=original_start_time)
     print("Reading Test Transforms")
     test_cam_infos = constructCameras_waymo(test_frames_list, white_background, timestamp_mapper,
-                                            load_intrinsic=load_intrinsic, load_c2w=load_c2w,start_time=start_time,original_start_time=original_start_time)
+                                            load_intrinsic=load_intrinsic, load_c2w=load_c2w,start_time=start_time,
+                                            original_start_time=original_start_time)
     print("Reading Full Transforms")
     # full_cam_infos = constructCameras_waymo(full_frames_list, white_background, timestamp_mapper,
     #                                         load_intrinsic=load_intrinsic, load_c2w=load_c2w,start_time=start_time,original_start_time=original_start_time)

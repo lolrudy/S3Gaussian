@@ -19,9 +19,11 @@ from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianR
 from scene.gaussian_model import GaussianModel
 from utils.sh_utils import eval_sh
 from time import time as get_time
+from utils.refs import THING
 
 def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None, 
-           stage="fine",return_decomposition=False,return_dx=False,render_feat=False,render_dyn_acc=False):
+           stage="fine",return_decomposition=False,return_dx=False,render_feat=False,render_dyn_acc=False, return_road_sky=False,
+           return_semantic_decomposition=False, return_dynamic_init=False):
     """
     Render the scene. 
     
@@ -223,7 +225,66 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
             "visibility_filter_s" : radii_s > 0,
             })
         
-    if render_dyn_acc:
+    if return_semantic_decomposition:
+        semantic_img_dict = {}
+        semantic_depth_dict = {}
+        for seman_cat in [THING.STATIC_OBJECT, THING.DYNAMIC_OBJECT, THING.VEHICLE, THING.ROAD, THING.SKY]:
+            mask = pc._thing_map == seman_cat
+            semantic_img_dict[seman_cat], _, semantic_depth_dict[seman_cat] = rasterizer(
+                means3D = means3D_final[mask],
+                means2D = means2D[mask],
+                shs = shs_final[mask] if shs_final is not None else None,
+                colors_precomp = colors_precomp[mask] if colors_precomp is not None else None, # [N,3]
+                opacities = opacity[mask],
+                scales = scales_final[mask],
+                rotations = rotations_final[mask],
+                cov3D_precomp = cov3D_precomp[mask] if cov3D_precomp is not None else None)
+        result_dict['semantic_img_dict'] = semantic_img_dict
+        result_dict['semantic_depth_dict'] = semantic_depth_dict
+
+    if return_road_sky:
+        assert not return_semantic_decomposition
+        semantic_img_dict = {}
+        semantic_depth_dict = {}
+        for seman_cat in [THING.ROAD, THING.SKY]:
+            mask = pc._thing_map == seman_cat
+            semantic_img_dict[seman_cat], _, semantic_depth_dict[seman_cat] = rasterizer(
+                means3D = means3D_final[mask],
+                means2D = means2D[mask],
+                shs = shs_final[mask] if shs_final is not None else None,
+                colors_precomp = colors_precomp[mask] if colors_precomp is not None else None, # [N,3]
+                opacities = opacity[mask],
+                scales = scales_final[mask],
+                rotations = rotations_final[mask],
+                cov3D_precomp = cov3D_precomp[mask] if cov3D_precomp is not None else None)
+        # flat_mask = (pc._thing_map == THING.ROAD) | (pc._thing_map == THING.SKY)
+        # mask = ~flat_mask
+        # if 'coarse' in stage:
+        #     mask = mask & (~pc._deformation_table)
+        # semantic_img_dict['other'], _, semantic_depth_dict['other'] = rasterizer(
+        #         means3D = means3D_final[mask],
+        #         means2D = means2D[mask],
+        #         shs = shs_final[mask] if shs_final is not None else None,
+        #         colors_precomp = colors_precomp[mask] if colors_precomp is not None else None, # [N,3]
+        #         opacities = opacity[mask],
+        #         scales = scales_final[mask],
+        #         rotations = rotations_final[mask],
+        #         cov3D_precomp = cov3D_precomp[mask] if cov3D_precomp is not None else None)
+        result_dict['semantic_img_dict'] = semantic_img_dict
+        result_dict['semantic_depth_dict'] = semantic_depth_dict
+        
+    if return_dynamic_init:
+        mask = pc._thing_map != THING.VEHICLE
+        result_dict['non_vehicle_rgb'], _, result_dict['non_vehicle_depth'] = rasterizer(
+                means3D = means3D_final[mask],
+                means2D = means2D[mask],
+                shs = shs_final[mask] if shs_final is not None else None,
+                colors_precomp = colors_precomp[mask] if colors_precomp is not None else None, # [N,3]
+                opacities = opacity[mask],
+                scales = scales_final[mask],
+                rotations = rotations_final[mask],
+                cov3D_precomp = cov3D_precomp[mask] if cov3D_precomp is not None else None)
+    if render_dyn_acc and 'fine' in stage:
         # dynamic_points = np.sum(dynamic_mask).item()
         dyn_color = torch.cat([deformation_point, deformation_point ,deformation_point], dim=-1).float()
         dyn_acc, _, _ = rasterizer(

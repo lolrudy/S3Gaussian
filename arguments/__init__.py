@@ -65,6 +65,7 @@ class ModelParams(ParamGroup):
         self.original_start_time = 0 # now hard-coded
         # self.num_objs = 256 
         self.num_pts = 1500000 
+        # TODO REDUCE PYTS NUM 100000?
         self.sky_pts_num = 300000
         # mask loading options
         self.load_sky_mask = False
@@ -86,7 +87,9 @@ class ModelParams(ParamGroup):
         self.recompute_occ_grid = False 
         
         self.split_dynamic = 1
-        
+        self.vehicle_extent = 1.2
+        self.sky_height = 20
+
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):
@@ -107,8 +110,9 @@ class OptimizationParams(ParamGroup):
         self.batch_size=1
         
         self.iterations = 50_000 # 30_000
-        self.coarse_iterations = 5000
-        self.eval_iterations = 30_000
+        self.coarse_iterations = 20_000
+        self.eval_iterations = 10_000
+        self.remove_interval = 1000
 
         self.position_lr_init = 0.00016
         self.position_lr_final = 0.0000016
@@ -128,13 +132,13 @@ class OptimizationParams(ParamGroup):
         self.rotation_lr = 0.001
         self.percent_dense = 0.01
         self.lambda_dssim = 0.2
-        self.lambda_depth = 0.5
+        self.lambda_depth = 1
         self.depth_loss_type = "l2"
         self.densification_interval = 100   # 100
         self.opacity_reset_interval = 3000
         self.pruning_interval = 100
         self.pruning_from_iter = 500
-        self.densify_until_iter = 25_000
+        self.densify_until_iter = 10_000
         # self.densify_grad_threshold = 0.0002
         self.densify_grad_threshold_coarse = 0.0002
         self.densify_grad_threshold_fine_init = 0.0002
@@ -147,7 +151,7 @@ class OptimizationParams(ParamGroup):
 
         self.random_background = False
         # for waymo
-        self.max_points = 500_000
+        self.max_pt_num = 2_000_000
         self.prune_from_iter = 500
         self.prune_interval = 100
         
@@ -174,8 +178,13 @@ class OptimizationParams(ParamGroup):
         self.bg_model_lr = 0.0025
         self.custom_xyz_scheduler = False
         
-        self.lambda_dyn_acc = 0.1
-        self.lambda_flat_reg = 100
+        self.lambda_dyn_acc = 0.0
+        self.lambda_flat_reg = 200
+        self.lambda_seman_rgb = 0.0
+        self.lambda_seman_depth = 1.0
+        self.lambda_vehicle_dx = 1
+        self.vehicle_dx_reg_iter = 5000
+        self.seman_fit_bg = 0
 
         # deprecated
         self.densify_from_iter = 500   # 调整至与position_lr_after_iter 一致  # 500
@@ -240,7 +249,7 @@ class ModelHiddenParams(ParamGroup):
         self.grid_pe=0
         self.static_mlp=False
         self.apply_rotation=False
-        self.sh_degree = 3
+        self.sh_degree = 0
 
         
         super().__init__(parser, "ModelHiddenParams")

@@ -33,6 +33,7 @@ import torch
 from utils.feature_extractor import extract_and_save_features
 from utils.image_utils import get_robust_pca
 from utils.refs import SEG_ID2NAME, SEG_NAME2ID, DYNAMIC_OBJECT_ID, STATIC_OBJECT_ID, VEHICLE_ID, FLAT_ID, THING
+from pyrotation.conversion import matrix_from_quaternion
 
 class CameraInfo(NamedTuple):
     uid: int
@@ -59,6 +60,8 @@ class CameraInfo(NamedTuple):
     # 
     intrinsic: np.array = None
     c2w: np.array = None
+    gt_bboxes: list = None
+    dynamic_mask_seman: np.array = None
 
 class SceneInfo(NamedTuple):
     point_cloud: BasicPointCloud
@@ -78,6 +81,9 @@ class SceneInfo(NamedTuple):
     dynamic_point_cloud: BasicPointCloud = None
     road_pcd: BasicPointCloud = None
     sky_pcd: BasicPointCloud = None
+    vehicle_pcd_dict: dict = None
+    static_vehicle_pcd: BasicPointCloud = None
+    vehicle_init_pose_dict: dict = None
 
 def getNerfppNorm(cam_info):
     def get_center_and_diag(cam_centers):
@@ -444,6 +450,7 @@ def constructCameras_waymo(frames_list, white_background, mapper = {},
 
         semantic_mask = frame["semantic_mask"]
         instance_mask = frame["instance_mask"]
+        dynamic_mask_seman = frame['dynamic_mask']
 
         # ------------------
         # load semantic mask
@@ -603,6 +610,8 @@ def constructCameras_waymo(frames_list, white_background, mapper = {},
                         feat_map=feat_map, # [640,960,3]
                         intrinsic=intrinsic if load_intrinsic else None,
                         c2w=c2w if load_c2w else None,
+                        gt_bboxes=frame['gt_bboxes'],
+                        dynamic_mask_seman=dynamic_mask_seman
                          ))
             
     return cam_infos
@@ -642,15 +651,20 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
     dynamic_mask_filepaths, sky_mask_filepaths = [], []
     semantic_mask_filepaths, instance_mask_filepaths = [], []
     semantic_masks, instance_masks = [], []
+    thing_masks = []
     sam_mask_filepaths = []
     feat_map_filepaths = []
     dynamic_mask_filepaths = []
     lidar_filepaths = []
-    bbox_filepaths = []
+    vehicle_points_dict = {}
+    vehicle_colors_dict = {}
+    vehicle_init_pose_dict = {}
+    gt_bboxes_list = []
+    dynamic_mask_seman_list = []
     for t in range(start_time, end_time):
         for cam_idx in camera_list:
             img_filepaths.append(os.path.join(data_root, "images", f"{t:03d}_{cam_idx}.jpg"))
-            #dynamic_mask_filepaths.append(os.path.join(data_root, "dynamic_masks", f"{t:03d}_{cam_idx}.png"))
+            dynamic_mask_filepaths.append(os.path.join(data_root, "dynamic_masks", f"{t:03d}_{cam_idx}.png"))
             sky_mask_filepaths.append(os.path.join(data_root, "sky_masks", f"{t:03d}_{cam_idx}.png"))
             #semantic_mask_filepaths.append(os.path.join(data_root, "semantic_masks", f"{t:03d}_{cam_idx}.png"))
             #instance_mask_filepaths.append(os.path.join(data_root, "instance_masks", f"{t:03d}_{cam_idx}.png"))
@@ -880,7 +894,22 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                 # TODO foreground background
                 # transform world-lidar to pixel-depth-map
                 rgb_point = np.random.random((len(lidar_points), 3))
-                for cam_idx in range(len(camera_list)):
+                if args.load_gt_bbox:
+                    gt_bbox_path = os.path.join(data_root, "gt_bbox", f"{t:03d}.json")
+                    with open(gt_bbox_path, 'r') as file:
+                        gt_bbox_origin = json.load(file)
+                    gt_bboxes = []
+                    for box in gt_bbox_origin:
+                        if box['type'] != 'vehicle' or box['is_moving'] == False:
+                            continue
+                        for key in ['translation', 'rotation', 'size']:
+                            box[key] = np.array(box[key])
+                        trs = np.linalg.inv(ego_to_world_start) @ \
+                            np.concatenate([box['translation'], [1]])
+                        box['translation'] = trs[:3]
+                        box['rotation'] = np.linalg.inv(ego_to_world_start[:3, :3]) @ matrix_from_quaternion(box['rotation'])
+                        gt_bboxes.append(box)
+                for cam_idx in camera_list:
                     if split_dynamic:
                         # TODO LOAD TRACKING RESULT
                         # dynamic_mask = Image.open(os.path.join(data_root, "dynamic_masks", f"{t:03d}_{cam_idx}.png"))
@@ -905,13 +934,16 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                             dynamic_mask[semantic_mask == obj_id] = 1
                         for obj_id in VEHICLE_ID:
                             thing_mask[semantic_mask == obj_id] = THING.VEHICLE
-                            dynamic_mask[semantic_mask == obj_id] = 1
+                            # dynamic_mask[semantic_mask == obj_id] = 1
                         for obj_id in FLAT_ID:
                             thing_mask[semantic_mask == obj_id] = THING.ROAD
                         thing_mask[semantic_mask == SEG_NAME2ID['Sky']] = THING.SKY
                     else:
                         thing_mask = np.zeros(load_size)
                         dynamic_mask = np.zeros(load_size)
+                    
+                    thing_masks.append(thing_mask)
+                    
                     image = Image.open(os.path.join(data_root, "images", f"{t:03d}_{cam_idx}.jpg"))
                     image = image.resize(load_size[::-1], Image.NEAREST)
                     image = np.array(image) / 255
@@ -953,14 +985,72 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                     # pixel_points = pixel_points[depth_sort_idx]
                     # depth_map[image_points[:, 1].astype(np.int32), image_points[:, 0].astype(np.int32)] = pixel_points[:, 2]
                     depth_maps.append(depth_map)
+                    
                     pixel_points_mask1[pixel_points_mask1] = valid_mask
+
                     dynamic_point_mask[pixel_points_mask1] += \
                         dynamic_mask[image_points[:, 1].astype(np.int32), image_points[:, 0].astype(np.int32)]
                     
                     rgb_point[pixel_points_mask1, :] = image[image_points[:, 1].astype(np.int32), image_points[:, 0].astype(np.int32)]
                     vis_mask[pixel_points_mask1] = 1
                     thing_point_map[pixel_points_mask1] = thing_mask[image_points[:, 1].astype(np.int32), image_points[:, 0].astype(np.int32)]
+
                     
+                    vehicle_moving_mask = np.zeros(len(pixel_points))
+                    
+                    gt_bboxes_vis = []
+                    for box in gt_bboxes:
+                        box_center = box['translation']
+                        camera_center = w2c[:3, :3] @ box_center + w2c[:3, 3:4].T
+                        proj_center = intrinsics[int(len(camera_list))*t + cam_idx] @ camera_center.T
+                        proj_center = proj_center[:2] / proj_center[2]
+                        proj_center = proj_center.squeeze()
+                        valid = (
+                        (proj_center[0] >= 0)
+                        & (proj_center[0] < load_size[1])
+                        & (proj_center[1] >= 0)
+                        & (proj_center[1] < load_size[0])
+                        )   
+                        proj_center = proj_center.astype(np.int32)
+                        if not valid:
+                            continue
+                        if thing_mask[proj_center[1], proj_center[0]] != THING.VEHICLE:
+                            continue
+                        gt_bboxes_vis.append(box)
+                        instance_id = instance_mask[proj_center[1], proj_center[0]]
+                        cid = semantic_mask[proj_center[1], proj_center[0]]
+                        box_mask = (instance_mask == instance_id) & (semantic_mask == cid)
+                        # TODO DYNAMIC MASK
+                        dynamic_mask[box_mask] = True
+                        box_point_mask = box_mask[image_points[:, 1].astype(np.int32), image_points[:, 0].astype(np.int32)]
+                        color = image[image_points[:, 1].astype(np.int32), image_points[:, 0].astype(np.int32)]
+                        box_lidar_points = lidar_points[pixel_points_mask1][box_point_mask]
+                        diameter = np.linalg.norm(box['size'])
+                        thr = diameter / 2 * args.vehicle_extent
+                        center_dist = np.linalg.norm(box_lidar_points.T - np.expand_dims(box['translation'], -1), axis=0)
+                        box_point_mask[box_point_mask] = center_dist < thr
+                        box_lidar_points = lidar_points[pixel_points_mask1][box_point_mask]
+                        color_lidar_points = color[box_point_mask]
+
+                        vehicle_moving_mask[box_point_mask] = 1
+                        gid = box['gid']
+                        if gid not in vehicle_points_dict.keys():
+                            vehicle_init_pose_dict[gid] = box
+                            vehicle_points_dict[gid] = box_lidar_points
+                            vehicle_colors_dict[gid] = color_lidar_points
+                        else:
+                            init_box = vehicle_init_pose_dict[gid]
+                            canonicalized_lidar_points = box['rotation'].T @ (box_lidar_points.T - np.expand_dims(box['translation'], -1))
+                            init_lidar_points = init_box['rotation'] @ canonicalized_lidar_points + np.expand_dims(init_box['translation'], -1)
+                            vehicle_points_dict[gid] = np.concatenate([vehicle_points_dict[gid], init_lidar_points.T], axis=0)
+                            vehicle_colors_dict[gid] = np.concatenate([vehicle_colors_dict[gid], color_lidar_points], axis=0)
+                    
+                    # gt_bboxes_list.append(gt_bboxes_vis)
+                    gt_bboxes_list.append(gt_bboxes)
+                    vis_mask[pixel_points_mask1] = (vis_mask[pixel_points_mask1] > 0) & (vehicle_moving_mask == 0)
+                    dynamic_mask_seman_list.append(dynamic_mask)
+                    
+                                        
             # # compute lidar directions
             # lidar_directions = lidar_points - lidar_origins
             # lidar_ranges = np.linalg.norm(lidar_directions, axis=-1, keepdims=True)
@@ -975,7 +1065,6 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
             # laser_ids.append(lidar_ids)
             
             # points.append(lidar_points)
-            # TODO SEPARATE ROAD SKY CAR POINTS
             sh = RGB2SH(rgb_point)
             points.append(lidar_points[(vis_mask > 0)])
             shs.append(sh[(vis_mask > 0)])
@@ -1001,12 +1090,12 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
         points_all = points.copy()
         shs_all = shs.copy()
         # static point
-        static_point_maps = (thing_point_maps == THING.STATIC_OBJECT) | (thing_point_maps == THING.ROAD)
+        static_point_maps = (thing_point_maps == THING.STATIC_OBJECT) | (thing_point_maps == THING.ROAD) | (thing_point_maps == THING.VEHICLE)
         points = points_all[static_point_maps]
         shs = shs_all[static_point_maps]
         static_thing_maps = thing_point_maps[static_point_maps]
         # dynamic point
-        dynamic_point_maps = (thing_point_maps == THING.DYNAMIC_OBJECT) | (thing_point_maps == THING.VEHICLE)
+        dynamic_point_maps = (thing_point_maps == THING.DYNAMIC_OBJECT) 
         dynamic_points = points_all[dynamic_point_maps]
         dynamic_shs = shs_all[dynamic_point_maps]
         dynamic_thing_maps = thing_point_maps[dynamic_point_maps]
@@ -1073,22 +1162,34 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
             sky_pts_x_num = int(np.sqrt(args.sky_pts_num))
             sky_pts_num = sky_pts_x_num ** 2
             sky_points = np.zeros([sky_pts_num, 3])
-            sky_colors = np.zeros([sky_pts_num, 3])
-            x_sky = np.linspace(xyz_min[0], xyz_max[0], sky_pts_x_num)
-            y_sky = np.linspace(xyz_min[1], xyz_max[1], sky_pts_x_num)
+            sky_colors = np.ones([sky_pts_num, 3])
+            x_sky = np.linspace(aabb[0,0], aabb[1,0], sky_pts_x_num)
+            y_sky = np.linspace(aabb[0,1], aabb[1,1], sky_pts_x_num)
             xv, yv = np.meshgrid(x_sky, y_sky)
             sky_points[:, 0] = xv.flatten()
             sky_points[:, 1] = yv.flatten()
-            sky_points[:, 2] = z_max * 2
+            sky_points[:, 2] = args.sky_height
             sky_pcd = BasicPointCloud(points=sky_points, colors=SH2RGB(sky_colors), 
                                        normals=np.zeros((sky_pts_num, 3)))
             dynamic_pcd = BasicPointCloud(points=dynamic_points, colors=SH2RGB(dynamic_shs), normals=np.zeros((len(dynamic_points), 3))) 
+            
+            static_vehicle_points = points[static_thing_maps==THING.VEHICLE]
+            static_vehicle_shs = shs[static_thing_maps==THING.VEHICLE]
+            static_vehicle_pcd = BasicPointCloud(points=static_vehicle_points, colors=SH2RGB(static_vehicle_shs), 
+                                       normals=np.zeros_like(static_vehicle_points))
             points = points[static_thing_maps==THING.STATIC_OBJECT]
             shs = shs[static_thing_maps==THING.STATIC_OBJECT]
+            vehicle_pcd_dict = {}
+            for key in vehicle_points_dict.keys():
+                # TODO DOWNSAMPLE EACH CAR
+                vehicle_pcd_dict[key] = BasicPointCloud(points=vehicle_points_dict[key], colors=vehicle_colors_dict[key], 
+                                       normals=np.zeros_like(vehicle_points_dict[key]))
+                
         else:
             dynamic_pcd = None
             road_pcd = None
             sky_pcd = None
+            vehicle_pcd_dict = None
             
         # save ply
         ply_path = os.path.join(data_root, "ds-points3d.ply")
@@ -1121,11 +1222,13 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                             load_size = [load_size[1], load_size[0]],   # [w, h] for PIL.resize
                             sky_mask_path = sky_mask_filepaths[train_idx[idx]] if load_sky_mask else None,
                             depth_map = depth_maps[train_idx[idx]] if load_depthmap else None,
-                            semantic_mask = semantic_masks[train_idx[idx]] if load_panoptic_mask else None,
+                            semantic_mask = thing_masks[train_idx[idx]] if load_panoptic_mask else None,
                             instance_mask = instance_masks[train_idx[idx]] if load_panoptic_mask else None,
                             sam_mask_path = sam_mask_filepaths[train_idx[idx]] if load_sam_mask else None,
                             feat_map_path = feat_map_filepaths[train_idx[idx]] if load_feat_map else None,
                             dynamic_mask_path = dynamic_mask_filepaths[train_idx[idx]] if load_dynamic_mask else None,
+                            gt_bboxes = gt_bboxes_list[train_idx[idx]] if len(gt_bboxes_list)>0 else None,
+                            dynamic_mask = dynamic_mask_seman_list[train_idx[idx]] if len(dynamic_mask_seman_list)>0 else None,
         )
         train_frames_list.append(frame_dict)
     for idx, t in enumerate(test_timestamps):
@@ -1136,11 +1239,14 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                             load_size = [load_size[1], load_size[0]],   # [w, h] for PIL.resize
                             sky_mask_path = sky_mask_filepaths[test_idx[idx]] if load_sky_mask else None,
                             depth_map = depth_maps[test_idx[idx]] if load_depthmap else None,
-                            semantic_mask = semantic_masks[test_idx[idx]] if load_panoptic_mask else None,
+                            semantic_mask = thing_masks[test_idx[idx]] if load_panoptic_mask else None,
                             instance_mask = instance_masks[test_idx[idx]] if load_panoptic_mask else None,
                             sam_mask_path = sam_mask_filepaths[test_idx[idx]] if load_sam_mask else None,
                             feat_map_path = feat_map_filepaths[test_idx[idx]] if load_feat_map else None,
                             dynamic_mask_path = dynamic_mask_filepaths[test_idx[idx]] if load_dynamic_mask else None,
+                            gt_bboxes = gt_bboxes_list[test_idx[idx]] if len(gt_bboxes_list)>0 else None,
+                            dynamic_mask = dynamic_mask_seman_list[test_idx[idx]] if len(dynamic_mask_seman_list)>0 else None,
+
         )
         test_frames_list.append(frame_dict)
     if len(test_timestamps)==0:
@@ -1154,11 +1260,14 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                                 load_size = [load_size[1], load_size[0]],   # [w, h] for PIL.resize
                                 sky_mask_path = sky_mask_filepaths[full_idx[idx]] if load_sky_mask else None,
                                 depth_map = depth_maps[full_idx[idx]] if load_depthmap else None,
-                                semantic_mask = semantic_masks[full_idx[idx]] if load_panoptic_mask else None,
+                                semantic_mask = thing_masks[full_idx[idx]] if load_panoptic_mask else None,
                                 instance_mask = instance_masks[full_idx[idx]] if load_panoptic_mask else None,
                                 sam_mask_path = sam_mask_filepaths[full_idx[idx]] if load_sam_mask else None,
                                 feat_map_path = feat_map_filepaths[full_idx[idx]] if load_feat_map else None,
                                 dynamic_mask_path = dynamic_mask_filepaths[full_idx[idx]] if load_dynamic_mask else None,
+                                gt_bboxes = gt_bboxes_list[full_idx[idx]] if len(gt_bboxes_list)>0 else None,
+                                dynamic_mask = dynamic_mask_seman_list[full_idx[idx]] if len(dynamic_mask_seman_list)>0 else None,
+
             )
             full_frames_list.append(frame_dict)
     
@@ -1226,7 +1335,10 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                            # occ grid
                            occ_grid=occ_grid if save_occ_grid else None,
                            road_pcd = road_pcd,
-                           sky_pcd = sky_pcd
+                           sky_pcd = sky_pcd,
+                           static_vehicle_pcd=static_vehicle_pcd,
+                           vehicle_pcd_dict=vehicle_pcd_dict,
+                           vehicle_init_pose_dict=vehicle_init_pose_dict
                            )
 
     return scene_info

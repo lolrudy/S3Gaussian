@@ -25,16 +25,17 @@ FLAT = ['Bike Lane', 'Crosswalk - Plain', 'Curb Cut',
 BARRIER = ['Curb', 'Fence', 'Guard Rail', 'Barrier', 'Wall']
 STRUCTURE = ['Bridge', 'Building', 'Tunnel']
 HUMAN = ['Person', 'Bicyclist', 'Motorcyclist', 'Other Rider']
-NATURE = ['Mountain', 'Sand', 'Sky', 'Snow', 'Terrain', 'Vegetation', 'Water']
+NATURE = ['Mountain', 'Sand', 'Snow', 'Terrain', 'Vegetation', 'Water']
 MARKING = ['Lane Marking - Crosswalk', 'Lane Marking - General']
 VOID = ['Car Mount', 'Ego Vehicle']
 OTHER_OBJECT = ['Banner', 'Bench', 'Bike Rack', 'Billboard', 'Catch Basin', 'CCTV Camera', 'Fire Hydrant', 
                  'Junction Box', 'Mailbox', 'Manhole', 'Phone Booth', 'Pothole', 'Street Light', 'Trash Can']
 TRAFFIC_LIGHT = ['Traffic Light']
+SKY = ['Sky']
 
-DYNAMIC_OBJECT = HUMAN + ANIMAL + TRAFFIC_LIGHT # EXCEPT VEHICLE
-STATIC_OBJECT = SUPPORT + TRAFFIC_SIGN + BARRIER + STRUCTURE + NATURE + MARKING + VOID + OTHER_OBJECT # EXCEPT FLAT
-assert len(DYNAMIC_OBJECT + STATIC_OBJECT + FLAT + VEHICLE) == len(SEG_ID2NAME)
+DYNAMIC_OBJECT = HUMAN + ANIMAL # EXCEPT VEHICLE
+STATIC_OBJECT = SUPPORT + TRAFFIC_SIGN + BARRIER + STRUCTURE + NATURE + MARKING + VOID + OTHER_OBJECT + TRAFFIC_LIGHT # EXCEPT FLAT and SKY
+assert len(DYNAMIC_OBJECT + STATIC_OBJECT + FLAT + VEHICLE + SKY) == len(SEG_ID2NAME)
 
 VEHICLE_ID = [SEG_NAME2ID[cls_name] for cls_name in VEHICLE]
 DYNAMIC_OBJECT_ID = [SEG_NAME2ID[cls_name] for cls_name in DYNAMIC_OBJECT]

@@ -37,6 +37,7 @@ import json
 from utils.video_utils import render_pixels, save_videos
 from utils.visualization_tools import compute_optical_flow_and_save
 from scene.gaussian_model import merge_models
+from utils.refs import THING
 
 to8b = lambda x : (255*np.clip(x.cpu().numpy(),0,1)).astype(np.uint8)
 
@@ -58,6 +59,15 @@ render_keys = [
     "static_depths",
     "forward_flows",
     "backward_flows",
+    'static_obj_rgb',
+    'static_obj_depth',
+    'dynamic_obj_rgb',
+    'dynamic_obj_depth',
+    'vehicle_rgb',
+    'vehicle_depth',
+    'road_rgb',
+    'road_depth',
+    'sky_rgb',
 ]
 
 @torch.no_grad()
@@ -72,6 +82,7 @@ def do_evaluation(
     render_full,
     step: int = 0,
     args = None,
+    stage = 'fine'
 ):
     if len(viewpoint_stack_test) != 0:
         print("Evaluating Test Set Pixels...")
@@ -81,8 +92,9 @@ def do_evaluation(
             bg,
             pipe,
             compute_metrics=True,
-            return_decomposition=True,
-            debug=args.debug_test
+            return_decomposition='fine' in stage,
+            debug=args.debug_test,
+            stage=stage
         )
         eval_dict = {}
         for k, v in render_results.items():
@@ -100,12 +112,12 @@ def do_evaluation(
         os.makedirs(f"{eval_dir}/metrics", exist_ok=True)
         os.makedirs(f"{eval_dir}/test_videos", exist_ok=True)
         
-        test_metrics_file = f"{eval_dir}/metrics/{step}_images_test_{current_time}.json"
+        test_metrics_file = f"{eval_dir}/metrics/{stage}_{step}_images_test_{current_time}.json"
         with open(test_metrics_file, "w") as f:
             json.dump(eval_dict, f)
         print(f"Image evaluation metrics saved to {test_metrics_file}")
 
-        video_output_pth = f"{eval_dir}/test_videos/{step}.mp4"
+        video_output_pth = f"{eval_dir}/test_videos/{stage}_{step}.mp4"
 
         vis_frame_dict = save_videos(
             render_results,
@@ -128,7 +140,7 @@ def do_evaluation(
             bg,
             pipe,
             compute_metrics=True,
-            return_decomposition=False,
+            return_decomposition='fine' in stage,
             debug=args.debug_test
         )
         eval_dict = {}
@@ -147,12 +159,12 @@ def do_evaluation(
         os.makedirs(f"{eval_dir}/metrics", exist_ok=True)
         os.makedirs(f"{eval_dir}/train_videos", exist_ok=True)
         
-        train_metrics_file = f"{eval_dir}/metrics/{step}_images_train.json"
+        train_metrics_file = f"{eval_dir}/metrics/{stage}_{step}_images_train.json"
         with open(train_metrics_file, "w") as f:
             json.dump(eval_dict, f)
         print(f"Image evaluation metrics saved to {train_metrics_file}")
 
-        video_output_pth = f"{eval_dir}/train_videos/{step}.mp4"
+        video_output_pth = f"{eval_dir}/train_videos/{stage}_{step}.mp4"
 
         vis_frame_dict = save_videos(
             render_results,
@@ -168,7 +180,7 @@ def do_evaluation(
         del render_results
         torch.cuda.empty_cache()
 
-    if render_full:
+    if render_full and (not (len(viewpoint_stack_train) != 0 and len(viewpoint_stack_test) != 0)):
         print("Evaluating Full Set...")
         render_results = render_pixels(
             viewpoint_stack_full,
@@ -196,13 +208,13 @@ def do_evaluation(
         os.makedirs(f"{eval_dir}/metrics", exist_ok=True)
         os.makedirs(f"{eval_dir}/full_videos", exist_ok=True)
         
-        test_metrics_file = f"{eval_dir}/metrics/{step}_images_full_{current_time}.json"
+        test_metrics_file = f"{eval_dir}/metrics/{stage}_{step}_images_full_{current_time}.json"
         with open(test_metrics_file, "w") as f:
             json.dump(eval_dict, f)
         print(f"Image evaluation metrics saved to {test_metrics_file}")
 
         # if render_video_postfix is None:
-        video_output_pth = f"{eval_dir}/full_videos/{step}.mp4"
+        video_output_pth = f"{eval_dir}/full_videos/{stage}_{step}.mp4"
         vis_frame_dict = save_videos(
             render_results,
             video_output_pth,
@@ -219,7 +231,7 @@ def do_evaluation(
 
 def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_iterations, 
                          checkpoint_iterations, checkpoint, debug_from,
-                         gaussians, scene, stage, tb_writer, train_iter,timer):
+                         gaussians: GaussianModel, scene, stage, tb_writer, train_iter,timer):
     first_iter = 0
 
     gaussians.training_setup(opt)
@@ -331,7 +343,6 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         # batch size
         idx = 0
         viewpoint_cams = []
-
         while idx < batch_size :    
             
             viewpoint_cam = viewpoint_stack.pop(randint(0,len(viewpoint_stack)-1))
@@ -377,7 +388,11 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             render_pkg = render(viewpoint_cam, gaussians, pipe, background, 
                                 stage=stage,return_dx=True,
                                 render_feat = True if ('fine' in stage and args.feat_head) else False,
-                                render_dyn_acc = args.split_dynamic)
+                                render_dyn_acc = args.split_dynamic and opt.lambda_dyn_acc > 0. and 'fine' in stage,
+                                # return_semantic_decomposition=args.split_dynamic and opt.lambda_seman_rgb > 0.,
+                                return_road_sky=args.split_dynamic and opt.lambda_seman_rgb > 0.,
+                                return_decomposition='coarse' in stage and args.split_dynamic)
+
             image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
             depth_pred = render_pkg["depth"]
             depth_preds.append(depth_pred.unsqueeze(0))
@@ -397,17 +412,25 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         depth_pred_tensor = torch.cat(depth_preds,0)
         gt_image_tensor = torch.cat(gt_images,0)
         gt_depth_tensor = torch.cat(gt_depths,0).float()
-        # Loss
-        # breakpoint()
-        Ll1 = l1_loss(image_tensor, gt_image_tensor[:,:3,:,:])
 
         psnr_ = psnr(image_tensor, gt_image_tensor).mean().double()
         # if 'fine' in stage:
         #     psnr_dict.update({f"{viewpoint_cam.uid}": psnr_})
-        # norm        
-        loss = Ll1
-        loss_dict = {}
-        loss_dict['RGB_L1'] = Ll1
+        
+        if 'coarse' in stage and args.split_dynamic:
+            curr_mask = ~viewpoint_cam.dynamic_mask_seman
+            rgb = render_pkg['render_s']
+            depth = render_pkg['depth_s']
+            depth_loss = compute_depth_loss(args.depth_loss_type, depth[:,curr_mask], gt_depth_tensor[0,:,curr_mask]) * opt.lambda_depth
+            depth_loss = 0 if torch.isnan(depth_loss).any() else depth_loss   
+            Ll1 = l1_loss(rgb[:,curr_mask], gt_image_tensor[0,:3,curr_mask])
+        else:
+            Ll1 = l1_loss(image_tensor, gt_image_tensor[:,:3,:,:])
+            depth_loss = compute_depth_loss(args.depth_loss_type, depth_pred_tensor, gt_depth_tensor) * opt.lambda_depth
+            
+        loss = Ll1 + depth_loss
+        loss_dict = {'RGB_L1': Ll1, 'depth': depth_loss}
+
         # dx loss
         if 'fine' in stage and not args.no_dx and opt.lambda_dx !=0:
             dx_abs = torch.abs(render_pkg['dx'])
@@ -418,23 +441,22 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             dshs_abs = torch.abs(render_pkg['dshs'])
             dshs_loss = torch.mean(dshs_abs) * opt.lambda_dshs
             loss_dict['dsh'] = dshs_loss
-            loss += dshs_loss
-        if opt.lambda_depth != 0:
-            depth_loss = compute_depth_loss(args.depth_loss_type, depth_pred_tensor, gt_depth_tensor) * opt.lambda_depth
-            loss_dict['depth'] = depth_loss
-            loss += depth_loss
+            loss += dshs_loss            
         if stage == "fine" and hyper.time_smoothness_weight != 0:
             # tv_loss = 0
             tv_loss = gaussians.compute_regulation(hyper.time_smoothness_weight, hyper.l1_time_planes, hyper.plane_tv_weight)
             loss_dict['tv'] = tv_loss
             loss += tv_loss
-        if opt.lambda_dssim != 0:
+        
+        # TODO DEACTIVATE SSIM LOSS WHILE COARSE STAGE
+        if opt.lambda_dssim != 0 and 'fine' in stage:
             ssim_loss = ssim(image_tensor,gt_image_tensor)
             loss_dict['ssim'] = ssim_loss
             loss += opt.lambda_dssim * (1.0-ssim_loss)
-        if args.split_dynamic and opt.lambda_dyn_acc > 0.:
+            
+        if args.split_dynamic and opt.lambda_dyn_acc > 0. and 'fine' in stage and iteration > 10000:
             object_acc = torch.clamp(render_pkg['dynamic_acc'], min=1e-5, max=1-1e-5)
-            dynamic_mask = viewpoint_cam.dynamic_mask.to(object_acc.device) / 255.
+            dynamic_mask = viewpoint_cam.dynamic_mask_seman.to(object_acc.device).float()
             acc_loss = opt.lambda_dyn_acc * \
             -(dynamic_mask*torch.log(object_acc) + (1. - dynamic_mask)*torch.log(1. - object_acc)).mean()
             # acc_loss = opt.lambda_dyn_acc * \
@@ -449,7 +471,67 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             loss_dict['flat_reg_loss'] = flat_reg_loss
             loss += flat_reg_loss
     
-        
+        if args.split_dynamic and opt.lambda_seman_rgb > 0.:
+            assert batch_size == 1
+            semantic_mask = viewpoint_cam.semantic_mask
+            gt_rgb = gt_image_tensor[0]
+            gt_depth = gt_depth_tensor[0]
+            seman_loss = {}
+            for seman_cat in [THING.ROAD, THING.SKY]:
+                if seman_cat != 'other':
+                    curr_mask = semantic_mask == seman_cat
+                else:
+                    flat_mask = (semantic_mask == THING.ROAD) | (semantic_mask == THING.SKY)
+                    curr_mask = ~flat_mask
+                    if 'coarse' in stage:
+                        curr_mask = curr_mask & (~viewpoint_cam.dynamic_mask_seman)
+                rgb_cat = render_pkg['semantic_img_dict'][seman_cat]
+                depth_cat = render_pkg['semantic_depth_dict'][seman_cat]
+                if curr_mask.sum() > 0:
+                    if opt.seman_fit_bg:
+                        gt_rgb_cat = gt_rgb.clone()
+                        gt_rgb_cat[:, ~curr_mask] = 0
+                        gt_depth_cat = gt_depth.clone()
+                        gt_depth_cat[:, ~curr_mask] = 0
+                        if seman_cat == THING.SKY:
+                            curr_depth_loss = 0
+                        else:
+                            curr_depth_loss = compute_depth_loss(args.depth_loss_type, depth_cat, gt_depth_cat)
+                            curr_depth_loss = 0 if torch.isnan(curr_depth_loss).any() else curr_depth_loss
+                        curr_loss = opt.lambda_seman_rgb * l1_loss(rgb_cat, gt_rgb_cat) \
+                            + opt.lambda_seman_depth * curr_depth_loss
+                    else:
+                        if seman_cat == THING.SKY:
+                            curr_depth_loss = 0
+                        else:
+                            curr_depth_loss = compute_depth_loss(args.depth_loss_type, depth_cat[:,curr_mask], gt_depth[:,curr_mask])
+                            curr_depth_loss = 0 if torch.isnan(curr_depth_loss).any() else curr_depth_loss
+                        curr_loss = opt.lambda_seman_rgb * l1_loss(rgb_cat[:,curr_mask], gt_rgb[:,curr_mask]) \
+                            + opt.lambda_seman_depth * curr_depth_loss
+                    seman_loss[seman_cat] = curr_loss
+                    loss_dict[f'seman_loss_{seman_cat}'] = curr_loss
+            
+            if 'fine' not in stage:
+                seman_loss[THING.VEHICLE] = 0
+            loss_dict['seman_loss'] = sum(seman_loss.values())
+            loss += loss_dict['seman_loss']
+            
+        if args.split_dynamic and opt.lambda_vehicle_dx > 0. and 'fine' in stage and iteration < opt.vehicle_dx_reg_iter:
+            gt_bboxes = viewpoint_cam.gt_bboxes
+            dx = render_pkg['dx']
+            vehicle_dx_loss = {}
+            for box in gt_bboxes:
+                if box['gid'] in gaussians.vehicle_init_pose_dict:
+                    init_pose = gaussians.vehicle_init_pose_dict[box['gid']]
+                    vehicle_idx = gaussians.vehicle_gid2idx[box['gid']]
+                    point_mask = gaussians._vehicle_idx_table[gaussians._deformation_table] == vehicle_idx
+                    if point_mask.sum() > 0:
+                        delta_trans = box['translation'] - init_pose['translation']
+                        vehicle_dx_loss[box['gid']] = l1_loss(dx[point_mask], delta_trans.cuda())
+            loss_dict['vehicle_dx_loss'] = opt.lambda_vehicle_dx * sum(vehicle_dx_loss.values())
+            loss += loss_dict['vehicle_dx_loss']
+
+
         if stage == 'fine' and args.feat_head:
             feat = render_pkg['feat'].to('cuda') # [3,640,960]
             gt_feat = viewpoint_cam.feat_map.permute(2,0,1).to('cuda')
@@ -463,6 +545,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         loss.backward()
         if torch.isnan(loss).any():
             print("loss is nan, end training, reexecv program now.")
+            sys.exit(-1)
             os.execv(sys.executable, [sys.executable] + sys.argv)
         viewspace_point_tensor_grad = torch.zeros_like(viewspace_point_tensor)
         for idx in range(0, len(viewspace_point_tensor_list)):
@@ -522,53 +605,8 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                         render_training_image(scene, gaussians, [train_cams[iteration%len(train_cams)]], render, pipe, background, stage+"train", iteration,timer.get_elapsed_time())
 
                     # total_images.append(to8b(temp_image).transpose(1,2,0))
-            timer.start()
-            # Densification
-            if iteration < opt.densify_until_iter:
-                # Keep track of max radii in image-space for pruning
-                gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
-                gaussians.add_densification_stats(viewspace_point_tensor_grad, visibility_filter)
-
-                if stage == "coarse":
-                    opacity_threshold = opt.opacity_threshold_coarse
-                    densify_threshold = opt.densify_grad_threshold_coarse
-                else:    
-                    opacity_threshold = opt.opacity_threshold_fine_init - iteration*(opt.opacity_threshold_fine_init - opt.opacity_threshold_fine_after)/(opt.densify_until_iter)  
-                    densify_threshold = opt.densify_grad_threshold_fine_init - iteration*(opt.densify_grad_threshold_fine_init - opt.densify_grad_threshold_after)/(opt.densify_until_iter )  
-
-                if  iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0]<2000000:
-                    size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                     
-                    gaussians.densify(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold, 5, 5, scene.model_path, iteration, stage)
-                if  iteration > opt.pruning_from_iter and iteration % opt.pruning_interval == 0 : # and gaussians.get_xyz.shape[0]>200000
-                    size_threshold = 20 if iteration > opt.opacity_reset_interval else None
-
-                    gaussians.prune(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold)
-                    
-                # if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0 :
-                # if iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0]<360000 and opt.add_point:
-                #     gaussians.grow(5,5,scene.model_path,iteration,stage)
-                    # torch.cuda.empty_cache()
-                if iteration % opt.opacity_reset_interval == 0:
-                    print("reset opacity")
-                    gaussians.reset_opacity()
-                    
-            
-            # Optimizer step
-            if iteration < final_iter+1:
-                gaussians.optimizer.step()
-                gaussians.optimizer.zero_grad(set_to_none = True)
-
-            if (iteration in checkpoint_iterations):
-                save_path= "chkpnt" +f"_{stage}_" + str(opt.eval_iterations) + ".pth"
-                for file in os.listdir(scene.model_path):
-                    if file.endswith(".pth") and file != save_path:
-                        os.remove(os.path.join(scene.model_path, file))
-
-                print("\n[ITER {}] Saving Checkpoint".format(iteration))
-                torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" +f"_{stage}_" + str(iteration) + ".pth")
-
-            if (iteration == opt.eval_iterations):
+            if (iteration % opt.eval_iterations == 0):
                 eval_dir = os.path.join(args.model_path,"eval")
                 os.makedirs(eval_dir,exist_ok=True)
                 viewpoint_stack_full = scene.getFullCameras().copy()
@@ -585,8 +623,73 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                     eval_dir,
                     render_full=True,
                     step=iteration,
-                    args=args
+                    args=args,
+                    stage=stage
                 )
+            
+            
+            # Optimizer step
+            if iteration < final_iter+1:
+                gaussians.optimizer.step()
+                gaussians.optimizer.zero_grad(set_to_none = True)
+
+            if (iteration in checkpoint_iterations):
+                save_path = "chkpnt" +f"_{stage}_" + str(30000) + ".pth"
+                for file in os.listdir(scene.model_path):
+                    if file.endswith(".pth") and file != save_path:
+                        os.remove(os.path.join(scene.model_path, file))
+
+                print("\n[ITER {}] Saving Checkpoint".format(iteration))
+                torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" +f"_{stage}_" + str(iteration) + ".pth")
+            
+            timer.start()
+            
+            
+            
+            # Densification
+            if 'coarse' in stage or iteration < opt.densify_until_iter:
+                # TODO STUDY HOW TO PREVENT DENSIFY CAR POINTS BEFORE TRAINING
+                # Keep track of max radii in image-space for pruning
+                gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
+                gaussians.add_densification_stats(viewspace_point_tensor_grad, visibility_filter)
+
+                if stage == "coarse":
+                    opacity_threshold = opt.opacity_threshold_coarse
+                    densify_threshold = opt.densify_grad_threshold_coarse
+                else:    
+                    opacity_threshold = opt.opacity_threshold_fine_init - iteration*(opt.opacity_threshold_fine_init - opt.opacity_threshold_fine_after)/(opt.densify_until_iter)  
+                    densify_threshold = opt.densify_grad_threshold_fine_init - iteration*(opt.densify_grad_threshold_fine_init - opt.densify_grad_threshold_after)/(opt.densify_until_iter )  
+
+                # remove invisible point
+                if iteration == opt.remove_interval and 'coarse' in stage:
+                    remove_point = True
+                    remove_mask = (gaussians.max_radii2D == 0) & (~gaussians._deformation_table)
+                    gaussians.prune_points(remove_mask)
+                else:
+                    remove_point = False
+                    
+                if  (~remove_point) and iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0]<opt.max_pt_num:
+                    size_threshold = 20 if iteration > opt.opacity_reset_interval else None
+                    
+                    gaussians.densify(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold, 5, 5, scene.model_path, iteration, stage)
+                if  (~remove_point) and iteration > opt.pruning_from_iter and iteration % opt.pruning_interval == 0 :
+                    size_threshold = 20 if iteration > opt.opacity_reset_interval else None
+                    # opacity_threshold = 0.011 if iteration % opt.opacity_reset_interval == 0 else opacity_threshold
+                    gaussians.prune(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold, prune_dynamic='fine' in stage)
+                    
+                    
+                # if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0 :
+                # if iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0]<360000 and opt.add_point:
+                #     gaussians.grow(5,5,scene.model_path,iteration,stage)
+                    # torch.cuda.empty_cache()
+                if iteration % opt.opacity_reset_interval == 0:
+                    print("reset opacity")
+                    gaussians.reset_opacity()
+            # else:
+            #     if  iteration > opt.pruning_from_iter and iteration % opt.pruning_interval == 0 :
+            #         size_threshold = 20 if iteration > opt.opacity_reset_interval else None
+            #         gaussians.prune(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold, prune_dynamic='fine' in stage)
+            
 
 def training(dataset, hyper, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, expname):
     # first_iter = 0

@@ -63,7 +63,8 @@ def loadCam(args, id, cam_info, resolution_scale):
         # depth_map = DepthMaptoTorch(cam_info.depth_map)
     semantic_mask = None
     if cam_info.semantic_mask is not None:
-        semantic_mask = ObjectPILtoTorch(cam_info.semantic_mask, resolution)
+        semantic_mask = torch.from_numpy(cam_info.semantic_mask)
+        # ObjectPILtoTorch(cam_info.semantic_mask, resolution)
     instance_mask = None
     if cam_info.instance_mask is not None:
         instance_mask = ObjectPILtoTorch(cam_info.instance_mask, resolution)
@@ -82,6 +83,18 @@ def loadCam(args, id, cam_info, resolution_scale):
     c2w = None
     if cam_info.c2w is not None:
         c2w = torch.from_numpy(cam_info.c2w).to(dtype=torch.float32)
+    gt_bboxes = None
+    if cam_info.gt_bboxes is not None:
+        gt_bboxes = []
+        for box in cam_info.gt_bboxes:
+            for key in ['translation', 'rotation', 'size']:
+                if isinstance(box[key], np.ndarray):
+                    box[key] = torch.from_numpy(box[key]).to(dtype=torch.float32)
+            gt_bboxes.append(box)
+    dynamic_mask_seman = None
+    if cam_info.dynamic_mask_seman is not None:
+        dynamic_mask_seman = torch.from_numpy(cam_info.dynamic_mask_seman).bool()
+        
     return Camera(colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T, 
                   FoVx=cam_info.FovX, FoVy=cam_info.FovY, 
                   image=gt_image, gt_alpha_mask=loaded_mask,
@@ -95,7 +108,9 @@ def loadCam(args, id, cam_info, resolution_scale):
                   objects=torch.from_numpy(np.array(cam_info.objects)) if cam_info.objects is not None else None,
                   intrinsic = intrinsic, 
                   c2w = c2w,
-                  time = cam_info.time
+                  time = cam_info.time,
+                  gt_bboxes=gt_bboxes,
+                  dynamic_mask_seman=dynamic_mask_seman
                   )
 
 def cameraList_from_camInfos(cam_infos, resolution_scale, args):

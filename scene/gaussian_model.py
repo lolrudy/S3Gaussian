@@ -89,7 +89,10 @@ class GaussianModel:
             self.denom,
             self.optimizer.state_dict(),
             self.spatial_lr_scale,
-            self._thing_map
+            self._thing_map,
+            self._vehicle_idx_table,
+            self.vehicle_gid2idx,
+            self.vehicle_idx2gid
         )
     
     def restore(self, model_args, training_args):
@@ -109,7 +112,10 @@ class GaussianModel:
         denom,
         opt_dict, 
         self.spatial_lr_scale,
-        self._thing_map) = model_args
+        self._thing_map,
+        self._vehicle_idx_table,
+        self.vehicle_gid2idx,
+        self.vehicle_idx2gid) = model_args
         self._deformation.load_state_dict(deform_state)
         self.training_setup(training_args)
         self.xyz_gradient_accum = xyz_gradient_accum
@@ -148,32 +154,71 @@ class GaussianModel:
     def create_from_pcd(self, pcd : BasicPointCloud, spatial_lr_scale : float, 
                         dynamic_pcd: BasicPointCloud=None, 
                         road_pcd: BasicPointCloud=None, 
-                        sky_pcd: BasicPointCloud=None):
+                        sky_pcd: BasicPointCloud=None,
+                        static_vehicle_pcd: BasicPointCloud=None,
+                        vehicle_pcd_dict: dict=None,
+                        vehicle_init_pose_dict: dict=None):
         self.spatial_lr_scale = spatial_lr_scale
-
+        self.vehicle_idx2gid = {}
+        self.vehicle_gid2idx = {}
+        self.vehicle_init_pose_dict = vehicle_init_pose_dict
         if dynamic_pcd is not None:
+            fused_vehicle_pts = []
+            fused_vehicle_colors = []
+            fused_vehicle_idxes = []
+            vehicle_idx = 1
+            for vehicle_gid in vehicle_pcd_dict.keys():
+                vehicle_pcd = vehicle_pcd_dict[vehicle_gid]
+                vehicle_pts = torch.tensor(np.asarray(vehicle_pcd.points))
+                vehicle_colors = torch.tensor(np.asarray(vehicle_pcd.colors))
+                fused_vehicle_pts.append(vehicle_pts)
+                fused_vehicle_colors.append(vehicle_colors)
+                repeat_vehicle_idx = torch.ones(len(vehicle_pcd.points)) * vehicle_idx
+                fused_vehicle_idxes.append(repeat_vehicle_idx)
+                self.vehicle_idx2gid[vehicle_idx] = vehicle_gid
+                self.vehicle_gid2idx[vehicle_gid] = vehicle_idx
+                vehicle_idx += 1
+                
+            fused_vehicle_pts = torch.cat(fused_vehicle_pts).float()
+            fused_vehicle_colors = torch.cat(fused_vehicle_colors).float()
+            fused_vehicle_idxes = torch.cat(fused_vehicle_idxes).float()
+                
             fused_point_cloud = torch.cat([torch.tensor(np.asarray(pcd.points)), 
+                                           torch.tensor(np.asarray(static_vehicle_pcd.points)), 
                                            torch.tensor(np.asarray(road_pcd.points)), 
                                            torch.tensor(np.asarray(sky_pcd.points)), 
-                                           torch.tensor(np.asarray(dynamic_pcd.points))]).float().cuda()
+                                           torch.tensor(np.asarray(dynamic_pcd.points)),
+                                           fused_vehicle_pts]).float().cuda()
             fused_color = RGB2SH(torch.cat([torch.tensor(np.asarray(pcd.colors)), 
+                                            torch.tensor(np.asarray(static_vehicle_pcd.colors)), 
                                             torch.tensor(np.asarray(road_pcd.colors)),
                                             torch.tensor(np.asarray(sky_pcd.colors)),
-                                            torch.tensor(np.asarray(dynamic_pcd.colors))]).float().cuda())
+                                            torch.tensor(np.asarray(dynamic_pcd.colors)),
+                                            fused_vehicle_colors]).float().cuda())
             static_point_num = pcd.points.shape[0]
+            static_vehicle_pt_num = static_vehicle_pcd.points.shape[0]
             road_point_num = road_pcd.points.shape[0]
             sky_point_num = sky_pcd.points.shape[0]
             dynamic_point_num = dynamic_pcd.points.shape[0]
-            print(f'original static point number: {static_point_num}')
-            print(f'original dynamic point number: {dynamic_point_num}')
+            dynamic_vehicle_pt_num = fused_vehicle_pts.shape[0]
+            print(f'original static point number: {static_point_num+static_vehicle_pt_num}')
+            print(f'original dynamic point number: {dynamic_point_num + dynamic_vehicle_pt_num}')
             self._deformation_table = torch.zeros((fused_point_cloud.shape[0]),device="cuda")
-            self._deformation_table[-dynamic_point_num:-1] = 1
+            self._deformation_table[-dynamic_point_num-dynamic_vehicle_pt_num:] = 1
             self._deformation_table = self._deformation_table.bool()
             
             self._thing_map =  torch.cat([torch.ones([static_point_num]) * THING.STATIC_OBJECT,
+                                          torch.ones([static_vehicle_pt_num]) * THING.VEHICLE,
                                           torch.ones([road_point_num]) * THING.ROAD,
                                           torch.ones([sky_point_num]) * THING.SKY,
-                                          torch.ones([dynamic_point_num]) * THING.DYNAMIC_OBJECT]).int().cuda()
+                                          torch.ones([dynamic_point_num]) * THING.DYNAMIC_OBJECT,
+                                          torch.ones([dynamic_vehicle_pt_num]) * THING.VEHICLE]).int().cuda()
+            self._vehicle_idx_table = torch.cat([torch.ones([static_point_num]) * -1,
+                                          torch.ones([static_vehicle_pt_num]) * -1,
+                                          torch.ones([road_point_num]) * -1,
+                                          torch.ones([sky_point_num]) * -1,
+                                          torch.ones([dynamic_point_num]) * -1,
+                                          fused_vehicle_idxes]).int().cuda()
 
         else:
             fused_point_cloud = torch.tensor(np.asarray(pcd.points)).float().cuda()
@@ -293,6 +338,8 @@ class GaussianModel:
             self._deformation_table = torch.load(os.path.join(path, "deformation_table.pth"),map_location="cuda")
         if os.path.exists(os.path.join(path, "thing_map.pth")):
             self._thing_map = torch.load(os.path.join(path, "thing_map.pth"),map_location="cuda")
+        if os.path.exists(os.path.join(path, "vehicle_idx_table.pth")):
+            self._vehicle_idx_table = torch.load(os.path.join(path, "vehicle_idx_table.pth"),map_location="cuda")
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
         # print(self._deformation.deformation_net.grid.)
         
@@ -300,6 +347,7 @@ class GaussianModel:
         torch.save(self._deformation.state_dict(),os.path.join(path, "deformation.pth"))
         torch.save(self._deformation_table,os.path.join(path, "deformation_table.pth"))
         torch.save(self._thing_map,os.path.join(path, "thing_map.pth"))
+        torch.save(self._vehicle_idx_table,os.path.join(path, "vehicle_idx_table.pth"))
         
     def save_ply(self, path):
         mkdir_p(os.path.dirname(path))
@@ -403,7 +451,7 @@ class GaussianModel:
         PlyData([static_el]).write(static_pcd_path)
                     
     def reset_opacity(self):
-        opacities_new = inverse_sigmoid(torch.min(self.get_opacity, torch.ones_like(self.get_opacity)*0.01))
+        opacities_new = inverse_sigmoid(torch.min(self.get_opacity, torch.ones_like(self.get_opacity) * 0.01))
         optimizable_tensors = self.replace_tensor_to_optimizer(opacities_new, "opacity")
         self._opacity = optimizable_tensors["opacity"]
 
@@ -498,6 +546,7 @@ class GaussianModel:
         self.xyz_gradient_accum = self.xyz_gradient_accum[valid_points_mask]
         self._deformation_table = self._deformation_table[valid_points_mask]
         self._thing_map = self._thing_map[valid_points_mask]
+        self._vehicle_idx_table = self._vehicle_idx_table[valid_points_mask]
         self.denom = self.denom[valid_points_mask]
         self.max_radii2D = self.max_radii2D[valid_points_mask]
 
@@ -524,7 +573,8 @@ class GaussianModel:
 
         return optimizable_tensors
 
-    def densification_postfix(self, new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation, new_deformation_table, new_thing_map):
+    def densification_postfix(self, new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation, 
+                              new_deformation_table, new_thing_map, new_vehicle_idx_table):
         d = {"xyz": new_xyz,
         "f_dc": new_features_dc,
         "f_rest": new_features_rest,
@@ -545,6 +595,7 @@ class GaussianModel:
         
         self._deformation_table = torch.cat([self._deformation_table,new_deformation_table],-1)
         self._thing_map = torch.cat([self._thing_map,new_thing_map],-1)
+        self._vehicle_idx_table = torch.cat([self._vehicle_idx_table, new_vehicle_idx_table], -1)
         self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self._deformation_accum = torch.zeros((self.get_xyz.shape[0], 3), device="cuda")
         self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
@@ -574,7 +625,9 @@ class GaussianModel:
         new_opacity = self._opacity[selected_pts_mask].repeat(N,1)
         new_deformation_table = self._deformation_table[selected_pts_mask].repeat(N)
         new_thing_map = self._thing_map[selected_pts_mask].repeat(N)
-        self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacity, new_scaling, new_rotation, new_deformation_table, new_thing_map)
+        new_vehicle_idx_table = self._vehicle_idx_table[selected_pts_mask].repeat(N)
+        self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacity, new_scaling, new_rotation, 
+                                   new_deformation_table, new_thing_map, new_vehicle_idx_table)
 
         prune_filter = torch.cat((selected_pts_mask, torch.zeros(N * selected_pts_mask.sum(), device="cuda", dtype=bool)))
         self.prune_points(prune_filter)
@@ -615,9 +668,11 @@ class GaussianModel:
         new_rotation = self._rotation[selected_pts_mask]
         new_deformation_table = self._deformation_table[selected_pts_mask]
         new_thing_map = self._thing_map[selected_pts_mask]
+        new_vehicle_idx_table = self._vehicle_idx_table[selected_pts_mask]
         # if opt.add_point:
         # selected_xyz, grow_xyz = self.add_point_by_mask(selected_pts_mask_grow.to(self.get_xyz.device), self.displacement_scale)
-        self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation, new_deformation_table, new_thing_map)
+        self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation, 
+                                   new_deformation_table, new_thing_map, new_vehicle_idx_table)
         # print("被动增加点云：",selected_xyz.shape[0])
         # print("主动增加点云：",selected_pts_mask.sum())
         # if model_path is not None and iteration is not None:
@@ -667,8 +722,10 @@ class GaussianModel:
         new_rotation = self._rotation[selected_pts_mask][mask]
         new_deformation_table = self._deformation_table[selected_pts_mask][mask]
         new_thing_map = self._thing_map[selected_pts_mask][mask]
+        new_vehicle_idx_table = self._vehicle_idx_table[selected_pts_mask][mask]
 
-        self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation, new_deformation_table)
+        self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, 
+                                   new_rotation, new_deformation_table, new_thing_map, new_vehicle_idx_table)
         return selected_xyz, new_xyz
     
     # def downsample_point(self, point_cloud):
@@ -723,7 +780,7 @@ class GaussianModel:
     #         o3d.io.write_point_cloud(os.path.join(write_path,f"iteration_{stage}{iteration}.ply"),point)
     #     return
     
-    def prune(self, max_grad, min_opacity, extent, max_screen_size):
+    def prune(self, max_grad, min_opacity, extent, max_screen_size, prune_dynamic=False):
         prune_mask = (self.get_opacity < min_opacity).squeeze()
 
         if max_screen_size:
@@ -732,6 +789,10 @@ class GaussianModel:
             prune_mask = torch.logical_or(prune_mask, big_points_vs)
 
             prune_mask = torch.logical_or(torch.logical_or(prune_mask, big_points_vs), big_points_ws)
+
+        if not prune_dynamic:
+            prune_mask = prune_mask & (~self._deformation_table)
+            
         self.prune_points(prune_mask)
 
         torch.cuda.empty_cache()

@@ -17,10 +17,21 @@
                 "waymo",
                 "--model_path",
                 "work_dirs/phase1/dynamic/recon/016_debug",
+                // "--eval_iterations",
+                // "1100",
+                // "--coarse_iterations",
+                // "0",
+                "--lambda_seman_rgb",
+                "1",
+                // "--coarse_iterations",
+                // "0"
                 // "--start_checkpoint",
-                // "work_dirs/phase1/dynamic/recon/016_naive_dynamic_acc01_dploss/chkpnt_fine_30000.pth",
-                "--lambda_dyn_acc",
-                "0.1",
+                // "/data3/zrd/project/S3Gaussian/work_dirs/phase1/dynamic/recon/016_seman0_vehicle_sh0/chkpnt_fine_50000.pth",
+                // "--eval_only",
+                "--sh_degree",
+                "0",
+                // "--lambda_dyn_acc",
+                // "1",
             ],
             "env": {
                 "CUDA_VISIBLE_DEVICES": "4"
@@ -38,7 +49,7 @@
                 "--scene_ids",
                 "16",
                 "--target_dir",
-                "data/waymo/processed",
+                "data/waymo/processed_debug",
             ],
             "env": {
                 "CUDA_VISIBLE_DEVICES": "4"

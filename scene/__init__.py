@@ -123,7 +123,10 @@ class Scene:
                                                               "bg_point_cloud.ply"))
         else:
             self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent, dynamic_pcd=scene_info.dynamic_point_cloud,
-                                           road_pcd=scene_info.road_pcd, sky_pcd=scene_info.sky_pcd)
+                                           road_pcd=scene_info.road_pcd, sky_pcd=scene_info.sky_pcd, 
+                                           static_vehicle_pcd=scene_info.static_vehicle_pcd,
+                                           vehicle_pcd_dict=scene_info.vehicle_pcd_dict,
+                                           vehicle_init_pose_dict=scene_info.vehicle_init_pose_dict)
             # for waymo
             if bg_gaussians is not None:
                 self.bg_gaussians.create_from_pcd(scene_info.bg_point_cloud, self.cameras_extent)

@@ -24,6 +24,8 @@ from utils.visualization_tools import (
     visualize_depth,
 )
 
+from utils.refs import THING
+
 depth_visualizer = lambda frame, opacity: visualize_depth(
     frame,
     opacity,
@@ -79,7 +81,8 @@ def render_pixels(
     compute_metrics: bool = True,
     return_decomposition: bool = True,
     debug:bool = False,
-    save_seperate_pcd_path: str = None
+    save_seperate_pcd_path: str = None,
+    stage: str = 'fine'
 ):
     """
     Render pixel-related outputs from a model.
@@ -99,7 +102,8 @@ def render_pixels(
         compute_metrics=compute_metrics,
         return_decomposition=return_decomposition,
         debug = debug,
-        save_seperate_pcd_path=save_seperate_pcd_path
+        save_seperate_pcd_path=save_seperate_pcd_path,
+        stage=stage
 
     )
     if compute_metrics:
@@ -125,7 +129,8 @@ def render_func(
     return_decomposition:bool = False,
     num_cams: int = 3,
     debug: bool = False,
-    save_seperate_pcd_path = None
+    save_seperate_pcd_path = None,
+    stage = 'fine'
 ):
     """
     Renders a dataset utilizing a specified render function.
@@ -163,6 +168,13 @@ def render_func(
     # flows
     forward_flows, backward_flows = [], []
     dx_list = []
+    
+    # seman
+    seman_rgbs_dict = {}
+    seman_depths_dict = {}
+    for seman_cat in [THING.STATIC_OBJECT, THING.DYNAMIC_OBJECT, THING.VEHICLE, THING.ROAD, THING.SKY]:
+        seman_rgbs_dict[seman_cat] = []
+        seman_depths_dict[seman_cat] = []
 
     if compute_metrics:
         psnrs, ssim_scores, feat_psnrs = [], [], []
@@ -174,7 +186,8 @@ def render_func(
         for i in tqdm(range(len(viewpoint_stack)), desc=f"rendering full data", dynamic_ncols=True):
             viewpoint_cam = viewpoint_stack[i]
 
-            render_pkg = render(viewpoint_cam, gaussians, pipe, bg,return_decomposition = return_decomposition,return_dx=True)
+            render_pkg = render(viewpoint_cam, gaussians, pipe, bg,return_decomposition = return_decomposition,return_dx=True, 
+                                return_semantic_decomposition=True, stage=stage)
             image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
             
             # ------------- rgb ------------- #
@@ -184,6 +197,13 @@ def render_func(
             rgbs.append(get_numpy(rgb.permute(1, 2, 0)))
             gt_rgbs.append(get_numpy(gt_rgb.permute(1, 2, 0)))
             
+            if 'semantic_img_dict' in render_pkg:
+                for seman_cat in [THING.STATIC_OBJECT, THING.DYNAMIC_OBJECT, THING.VEHICLE, THING.ROAD, THING.SKY]:
+                    seman_rgbs_dict[seman_cat].append(get_numpy(render_pkg["semantic_img_dict"][seman_cat].permute(1, 2, 0)))
+                    seman_depth_np = render_pkg["semantic_depth_dict"][seman_cat].permute(1, 2, 0).cpu().numpy()
+                    seman_depth_np /= seman_depth_np.max()
+                    seman_depths_dict[seman_cat].append(seman_depth_np)
+                
             if "render_s" in render_pkg:
                 static_rgbs.append(get_numpy(render_pkg["render_s"].permute(1, 2, 0)))
                 static_depth_np = render_pkg["depth_s"].permute(1, 2, 0).cpu().numpy()
@@ -356,6 +376,18 @@ def render_func(
         results_dict["median_depths"] = median_depths
     if len(dx_list) > 0:
         results_dict['dx_list'] = dx_list
+    # for seman_cat in [THING.STATIC_OBJECT, THING.DYNAMIC_OBJECT, THING.VEHICLE, THING.ROAD, THING.SKY]:
+    results_dict['static_obj_rgb'] = seman_rgbs_dict[THING.STATIC_OBJECT]
+    results_dict['static_obj_depth'] = seman_depths_dict[THING.STATIC_OBJECT]
+    results_dict['dynamic_obj_rgb'] = seman_rgbs_dict[THING.DYNAMIC_OBJECT]
+    results_dict['dynamic_obj_depth'] = seman_depths_dict[THING.DYNAMIC_OBJECT]
+    results_dict['vehicle_rgb'] = seman_rgbs_dict[THING.VEHICLE]
+    results_dict['vehicle_depth'] = seman_depths_dict[THING.VEHICLE]
+    results_dict['road_rgb'] = seman_rgbs_dict[THING.ROAD]
+    results_dict['road_depth'] = seman_depths_dict[THING.ROAD]
+    results_dict['sky_rgb'] = seman_rgbs_dict[THING.SKY]
+
+        
     return results_dict
 
 

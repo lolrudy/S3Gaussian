@@ -64,9 +64,8 @@ class ModelParams(ParamGroup):
         self.end_time = 49
         self.original_start_time = 0 # now hard-coded
         # self.num_objs = 256 
-        self.num_pts = 1500000 
-        # TODO REDUCE PYTS NUM 100000?
-        self.sky_pts_num = 300000
+        self.num_pts = 2_000_000
+        self.sky_pt_num = 100_000
         # mask loading options
         self.load_sky_mask = False
         self.load_panoptic_mask = True
@@ -89,6 +88,8 @@ class ModelParams(ParamGroup):
         self.split_dynamic = 1
         self.vehicle_extent = 1.2
         self.sky_height = 20
+
+        self.filter_vis_point = 0
 
         super().__init__(parser, "Loading Parameters", sentinel)
 
@@ -151,9 +152,10 @@ class OptimizationParams(ParamGroup):
 
         self.random_background = False
         # for waymo
-        self.max_pt_num = 2_000_000
+        self.max_pt_num = 4_000_000
         self.prune_from_iter = 500
         self.prune_interval = 100
+        self.prune_dynamic_iteration = 0
         
         self.scale_ratio = 1.0 #   global-scale = local-norm-scale * voxel_size * scale_ratio
         # feat

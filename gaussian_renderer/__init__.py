@@ -257,19 +257,19 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
                 scales = scales_final[mask],
                 rotations = rotations_final[mask],
                 cov3D_precomp = cov3D_precomp[mask] if cov3D_precomp is not None else None)
-        # flat_mask = (pc._thing_map == THING.ROAD) | (pc._thing_map == THING.SKY)
-        # mask = ~flat_mask
-        # if 'coarse' in stage:
-        #     mask = mask & (~pc._deformation_table)
-        # semantic_img_dict['other'], _, semantic_depth_dict['other'] = rasterizer(
-        #         means3D = means3D_final[mask],
-        #         means2D = means2D[mask],
-        #         shs = shs_final[mask] if shs_final is not None else None,
-        #         colors_precomp = colors_precomp[mask] if colors_precomp is not None else None, # [N,3]
-        #         opacities = opacity[mask],
-        #         scales = scales_final[mask],
-        #         rotations = rotations_final[mask],
-        #         cov3D_precomp = cov3D_precomp[mask] if cov3D_precomp is not None else None)
+        flat_mask = (pc._thing_map == THING.ROAD) | (pc._thing_map == THING.SKY)
+        mask = ~flat_mask
+        if 'coarse' in stage:
+            mask = mask & (~pc._deformation_table)
+        semantic_img_dict['other'], _, semantic_depth_dict['other'] = rasterizer(
+                means3D = means3D_final[mask],
+                means2D = means2D[mask],
+                shs = shs_final[mask] if shs_final is not None else None,
+                colors_precomp = colors_precomp[mask] if colors_precomp is not None else None, # [N,3]
+                opacities = opacity[mask],
+                scales = scales_final[mask],
+                rotations = rotations_final[mask],
+                cov3D_precomp = cov3D_precomp[mask] if cov3D_precomp is not None else None)
         result_dict['semantic_img_dict'] = semantic_img_dict
         result_dict['semantic_depth_dict'] = semantic_depth_dict
         
@@ -299,6 +299,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         result_dict['dynamic_acc'] = dyn_acc
         
     if return_dx and "fine" in stage:
+        # TODO REMOVE VEHICLE DX
         result_dict.update({"dx": dx})
         result_dict.update({'dshs' : dshs})
 

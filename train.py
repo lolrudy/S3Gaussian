@@ -477,7 +477,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             gt_rgb = gt_image_tensor[0]
             gt_depth = gt_depth_tensor[0]
             seman_loss = {}
-            for seman_cat in [THING.ROAD, THING.SKY]:
+            for seman_cat in [THING.ROAD, THING.SKY, 'other']:
                 if seman_cat != 'other':
                     curr_mask = semantic_mask == seman_cat
                 else:
@@ -667,15 +667,18 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                     gaussians.prune_points(remove_mask)
                 else:
                     remove_point = False
-                    
+
                 if  (~remove_point) and iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0]<opt.max_pt_num:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                     
                     gaussians.densify(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold, 5, 5, scene.model_path, iteration, stage)
+                
                 if  (~remove_point) and iteration > opt.pruning_from_iter and iteration % opt.pruning_interval == 0 :
+                    # TODO SAVE DYNAMIC POINT BEFORE RUNING
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                     # opacity_threshold = 0.011 if iteration % opt.opacity_reset_interval == 0 else opacity_threshold
-                    gaussians.prune(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold, prune_dynamic='fine' in stage)
+                    gaussians.prune(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold, 
+                                    prune_dynamic='fine' in stage and iteration > opt.prune_dynamic_iteration)
                     
                     
                 # if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0 :

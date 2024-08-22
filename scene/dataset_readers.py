@@ -909,7 +909,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                         box['translation'] = trs[:3]
                         box['rotation'] = np.linalg.inv(ego_to_world_start[:3, :3]) @ matrix_from_quaternion(box['rotation'])
                         gt_bboxes.append(box)
-                for cam_idx in camera_list:
+                for idx, cam_idx in enumerate(camera_list):
                     if split_dynamic:
                         # TODO LOAD TRACKING RESULT
                         # dynamic_mask = Image.open(os.path.join(data_root, "dynamic_masks", f"{t:03d}_{cam_idx}.png"))
@@ -952,7 +952,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                     vis_mask = np.zeros([lidar_points.shape[0]])
                     
                     # world-lidar-pts --> camera-pts : w2c
-                    c2w = cam_to_worlds[int(len(camera_list))*t + cam_idx]
+                    c2w = cam_to_worlds[int(len(camera_list))*t + idx]
                     w2c = np.linalg.inv(c2w)
                     cam_points = (
                         w2c[:3, :3] @ lidar_points.T
@@ -960,7 +960,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                     ).T
                     # camera-pts --> pixel-pts : intrinsic @ (x,y,z) = (u,v,1)*z
                     pixel_points = (
-                        intrinsics[int(len(camera_list))*t + cam_idx] @ cam_points.T
+                        intrinsics[int(len(camera_list))*t + idx] @ cam_points.T
                     ).T
                     pixel_points_mask1 = pixel_points[:, 2]>0
                     # select points in front of the camera
@@ -1002,7 +1002,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                     for box in gt_bboxes:
                         box_center = box['translation']
                         camera_center = w2c[:3, :3] @ box_center + w2c[:3, 3:4].T
-                        proj_center = intrinsics[int(len(camera_list))*t + cam_idx] @ camera_center.T
+                        proj_center = intrinsics[int(len(camera_list))*t + idx] @ camera_center.T
                         proj_center = proj_center[:2] / proj_center[2]
                         proj_center = proj_center.squeeze()
                         valid = (
@@ -1066,9 +1066,14 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
             
             # points.append(lidar_points)
             sh = RGB2SH(rgb_point)
-            points.append(lidar_points[(vis_mask > 0)])
-            shs.append(sh[(vis_mask > 0)])
-            thing_point_maps.append(thing_point_map[(vis_mask > 0)])
+            if args.filter_vis_point:
+                points.append(lidar_points[(vis_mask > 0)])
+                shs.append(sh[(vis_mask > 0)])
+                thing_point_maps.append(thing_point_map[(vis_mask > 0)])
+            else:
+                points.append(lidar_points)
+                shs.append(sh)
+                thing_point_maps.append(thing_point_map)
             # if t % 10 == 0:
             # dynamic_points.append(lidar_points[dynamic_point_mask > 0])
             # dynamic_shs.append(sh[dynamic_point_mask > 0])
@@ -1118,6 +1123,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
         # points,shs = GridSample3D(points, shs)
         # print("grid sampled points: ", points.shape)
 
+        print(f'original downsampled point {len(points)}')
         if len(points)>num_pts:
             downsampled_indices = np.random.choice(
                 len(points), num_pts, replace=False
@@ -1159,7 +1165,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
             road_pcd = BasicPointCloud(points=points[static_thing_maps==THING.ROAD], colors=SH2RGB(shs[static_thing_maps==THING.ROAD]), 
                                        normals=np.zeros((len(points[static_thing_maps==THING.ROAD]), 3)))
             z_max = xyz_max[2]
-            sky_pts_x_num = int(np.sqrt(args.sky_pts_num))
+            sky_pts_x_num = int(np.sqrt(args.sky_pt_num))
             sky_pts_num = sky_pts_x_num ** 2
             sky_points = np.zeros([sky_pts_num, 3])
             sky_colors = np.ones([sky_pts_num, 3])

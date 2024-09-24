@@ -127,6 +127,7 @@ class Scene:
                                            static_vehicle_pcd=scene_info.static_vehicle_pcd,
                                            vehicle_pcd_dict=scene_info.vehicle_pcd_dict,
                                            vehicle_init_pose_dict=scene_info.vehicle_init_pose_dict)
+                                        #    vehicle_pcd=scene_info.vehicle_pcd)
             # for waymo
             if bg_gaussians is not None:
                 self.bg_gaussians.create_from_pcd(scene_info.bg_point_cloud, self.cameras_extent)

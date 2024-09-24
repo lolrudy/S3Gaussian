@@ -157,50 +157,80 @@ class GaussianModel:
                         sky_pcd: BasicPointCloud=None,
                         static_vehicle_pcd: BasicPointCloud=None,
                         vehicle_pcd_dict: dict=None,
-                        vehicle_init_pose_dict: dict=None):
+                        vehicle_init_pose_dict: dict=None,
+                        vehicle_pcd:BasicPointCloud=None):
         self.spatial_lr_scale = spatial_lr_scale
         self.vehicle_idx2gid = {}
         self.vehicle_gid2idx = {}
         self.vehicle_init_pose_dict = vehicle_init_pose_dict
         if dynamic_pcd is not None:
-            fused_vehicle_pts = []
-            fused_vehicle_colors = []
-            fused_vehicle_idxes = []
-            vehicle_idx = 1
-            for vehicle_gid in vehicle_pcd_dict.keys():
-                vehicle_pcd = vehicle_pcd_dict[vehicle_gid]
-                vehicle_pts = torch.tensor(np.asarray(vehicle_pcd.points))
-                vehicle_colors = torch.tensor(np.asarray(vehicle_pcd.colors))
-                fused_vehicle_pts.append(vehicle_pts)
-                fused_vehicle_colors.append(vehicle_colors)
-                repeat_vehicle_idx = torch.ones(len(vehicle_pcd.points)) * vehicle_idx
-                fused_vehicle_idxes.append(repeat_vehicle_idx)
-                self.vehicle_idx2gid[vehicle_idx] = vehicle_gid
-                self.vehicle_gid2idx[vehicle_gid] = vehicle_idx
-                vehicle_idx += 1
-                
-            fused_vehicle_pts = torch.cat(fused_vehicle_pts).float()
-            fused_vehicle_colors = torch.cat(fused_vehicle_colors).float()
-            fused_vehicle_idxes = torch.cat(fused_vehicle_idxes).float()
-                
-            fused_point_cloud = torch.cat([torch.tensor(np.asarray(pcd.points)), 
-                                           torch.tensor(np.asarray(static_vehicle_pcd.points)), 
-                                           torch.tensor(np.asarray(road_pcd.points)), 
-                                           torch.tensor(np.asarray(sky_pcd.points)), 
-                                           torch.tensor(np.asarray(dynamic_pcd.points)),
-                                           fused_vehicle_pts]).float().cuda()
-            fused_color = RGB2SH(torch.cat([torch.tensor(np.asarray(pcd.colors)), 
-                                            torch.tensor(np.asarray(static_vehicle_pcd.colors)), 
-                                            torch.tensor(np.asarray(road_pcd.colors)),
-                                            torch.tensor(np.asarray(sky_pcd.colors)),
-                                            torch.tensor(np.asarray(dynamic_pcd.colors)),
-                                            fused_vehicle_colors]).float().cuda())
+            if vehicle_pcd_dict is not None:
+                fused_vehicle_pts = []
+                fused_vehicle_colors = []
+                fused_vehicle_idxes = []
+                vehicle_idx = 1
+                for vehicle_gid in vehicle_pcd_dict.keys():
+                    vehicle_pcd = vehicle_pcd_dict[vehicle_gid]
+                    vehicle_pts = torch.tensor(np.asarray(vehicle_pcd.points))
+                    vehicle_colors = torch.tensor(np.asarray(vehicle_pcd.colors))
+                    fused_vehicle_pts.append(vehicle_pts)
+                    fused_vehicle_colors.append(vehicle_colors)
+                    repeat_vehicle_idx = torch.ones(len(vehicle_pcd.points)) * vehicle_idx
+                    fused_vehicle_idxes.append(repeat_vehicle_idx)
+                    self.vehicle_idx2gid[vehicle_idx] = vehicle_gid
+                    self.vehicle_gid2idx[vehicle_gid] = vehicle_idx
+                    vehicle_idx += 1
+                    
+                fused_vehicle_pts = torch.cat(fused_vehicle_pts).float()
+                fused_vehicle_colors = torch.cat(fused_vehicle_colors).float()
+                fused_vehicle_idxes = torch.cat(fused_vehicle_idxes).float()
+                fused_point_cloud = torch.cat([torch.tensor(np.asarray(pcd.points)), 
+                                            torch.tensor(np.asarray(static_vehicle_pcd.points)), 
+                                            torch.tensor(np.asarray(road_pcd.points)), 
+                                            torch.tensor(np.asarray(sky_pcd.points)), 
+                                            torch.tensor(np.asarray(dynamic_pcd.points)),
+                                            fused_vehicle_pts]).float().cuda()
+                fused_color = RGB2SH(torch.cat([torch.tensor(np.asarray(pcd.colors)), 
+                                                torch.tensor(np.asarray(static_vehicle_pcd.colors)), 
+                                                torch.tensor(np.asarray(road_pcd.colors)),
+                                                torch.tensor(np.asarray(sky_pcd.colors)),
+                                                torch.tensor(np.asarray(dynamic_pcd.colors)),
+                                                fused_vehicle_colors]).float().cuda())
+                static_vehicle_pt_num = static_vehicle_pcd.points.shape[0]
+                dynamic_vehicle_pt_num = fused_vehicle_pts.shape[0]
+            else:
+                if vehicle_pcd is not None:
+                    fused_vehicle_pts = torch.tensor(np.asarray(vehicle_pcd.points))
+                    fused_vehicle_idxes = torch.zeros(len(fused_vehicle_pts))
+                    static_vehicle_pt_num = 0
+                    
+                    fused_point_cloud = torch.cat([torch.tensor(np.asarray(pcd.points)), 
+                                                torch.tensor(np.asarray(road_pcd.points)), 
+                                                torch.tensor(np.asarray(sky_pcd.points)), 
+                                                torch.tensor(np.asarray(dynamic_pcd.points)),
+                                                fused_vehicle_pts]).float().cuda()
+                    fused_color = RGB2SH(torch.cat([torch.tensor(np.asarray(pcd.colors)), 
+                                                    torch.tensor(np.asarray(road_pcd.colors)),
+                                                    torch.tensor(np.asarray(sky_pcd.colors)),
+                                                    torch.tensor(np.asarray(dynamic_pcd.colors)),
+                                                    torch.tensor(np.asarray(vehicle_pcd.colors))]).float().cuda())
+                    dynamic_vehicle_pt_num = fused_vehicle_pts.shape[0]
+                else:
+                    dynamic_vehicle_pt_num = 0
+                    static_vehicle_pt_num = 0
+                    fused_point_cloud = torch.cat([torch.tensor(np.asarray(pcd.points)), 
+                                                torch.tensor(np.asarray(road_pcd.points)), 
+                                                torch.tensor(np.asarray(sky_pcd.points)), 
+                                                torch.tensor(np.asarray(dynamic_pcd.points))]).float().cuda()
+                    fused_color = RGB2SH(torch.cat([torch.tensor(np.asarray(pcd.colors)), 
+                                                    torch.tensor(np.asarray(road_pcd.colors)),
+                                                    torch.tensor(np.asarray(sky_pcd.colors)),
+                                                    torch.tensor(np.asarray(dynamic_pcd.colors))]).float().cuda())
+                    fused_vehicle_idxes = torch.zeros([0])
             static_point_num = pcd.points.shape[0]
-            static_vehicle_pt_num = static_vehicle_pcd.points.shape[0]
             road_point_num = road_pcd.points.shape[0]
             sky_point_num = sky_pcd.points.shape[0]
             dynamic_point_num = dynamic_pcd.points.shape[0]
-            dynamic_vehicle_pt_num = fused_vehicle_pts.shape[0]
             print(f'original static point number: {static_point_num+static_vehicle_pt_num}')
             print(f'original dynamic point number: {dynamic_point_num + dynamic_vehicle_pt_num}')
             self._deformation_table = torch.zeros((fused_point_cloud.shape[0]),device="cuda")
@@ -272,6 +302,8 @@ class GaussianModel:
         ]
 
         self.optimizer = torch.optim.Adam(l, lr=0.0, eps=1e-15)
+        self.grid_optimizer = torch.optim.Adam([ {'params': list(self._deformation.get_grid_parameters()), 'lr': 0.1, "name": "grid"}],
+                                               lr=0.0, eps=1e-15)
         self.xyz_scheduler_args = get_expon_lr_func(lr_init=training_args.position_lr_init*self.spatial_lr_scale,
                                                     lr_final=training_args.position_lr_final*self.spatial_lr_scale,
                                                     lr_delay_mult=training_args.position_lr_delay_mult,

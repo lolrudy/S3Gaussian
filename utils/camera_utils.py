@@ -94,6 +94,14 @@ def loadCam(args, id, cam_info, resolution_scale):
     dynamic_mask_seman = None
     if cam_info.dynamic_mask_seman is not None:
         dynamic_mask_seman = torch.from_numpy(cam_info.dynamic_mask_seman).bool()
+    
+    vehicle_points = None
+    if cam_info.vehicle_points is not None:
+        vehicle_points = torch.from_numpy(cam_info.vehicle_points).to(dtype=torch.float32)
+        
+    vehicle_colors = None
+    if cam_info.vehicle_colors is not None:
+        vehicle_colors = torch.from_numpy(cam_info.vehicle_colors).to(dtype=torch.float32)
         
     return Camera(colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T, 
                   FoVx=cam_info.FovX, FoVy=cam_info.FovY, 
@@ -110,7 +118,9 @@ def loadCam(args, id, cam_info, resolution_scale):
                   c2w = c2w,
                   time = cam_info.time,
                   gt_bboxes=gt_bboxes,
-                  dynamic_mask_seman=dynamic_mask_seman
+                  dynamic_mask_seman=dynamic_mask_seman,
+                  vehicle_points=vehicle_points,
+                  vehicle_colors=vehicle_colors
                   )
 
 def cameraList_from_camInfos(cam_infos, resolution_scale, args):

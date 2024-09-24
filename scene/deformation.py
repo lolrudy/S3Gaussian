@@ -29,8 +29,18 @@ class Deformation(nn.Module):
         # self.args.empty_voxel=True
         if self.args.empty_voxel:
             self.empty_voxel = DenseGrid(channels=1, world_size=[64,64,64])
+        
         if self.args.static_mlp:
             self.static_mlp = nn.Sequential(nn.ReLU(),nn.Linear(self.W,self.W),nn.ReLU(),nn.Linear(self.W, 1))
+        
+        # TODO DEFINE MOTION BASIS
+        self.motion_basis_num = 32
+        # TODO DEFINE DX MLP
+        # self.MNH = self.W
+        self.motion_mlp = nn.Sequential(nn.Linear(self.grid.feat_dim,self.W),nn.ReLU(),nn.Linear(self.W,self.W),nn.ReLU(),
+                                        nn.Linear(self.W,self.W),nn.ReLU(),nn.Linear(self.W, self.motion_basis_num))
+        self.motion_basis_mlp = nn.Sequential(nn.Linear(1,self.W),nn.ReLU(),
+                                        nn.Linear(self.W,self.W),nn.ReLU(),nn.Linear(self.W, self.motion_basis_num * 3))
         
         self.ratio=0
         self.create_net()
@@ -95,6 +105,17 @@ class Deformation(nn.Module):
     @property
     def get_empty_ratio(self):
         return self.ratio
+    
+    def forward_motion(self, rays_pts_emb, time_emb):
+        hidden = self.query_time(rays_pts_emb, None, None, None, time_emb)
+        dx = self.pos_deform(hidden) 
+        dx[:,2] = 0
+        # grid_feature = self.grid(rays_pts_emb[:,:3])
+        # motion_basis = self.motion_basis_mlp(time_emb[0])
+        # weights = self.motion_mlp(grid_feature)
+        # dx = torch.mm(weights, motion_basis.reshape(self.motion_basis_num, 3))
+        return dx
+    
     def forward(self, rays_pts_emb, scales_emb=None, rotations_emb=None, opacity = None,shs_emb=None, time_feature=None, time_emb=None, mask=None):
         if time_emb is None:
             return self.forward_static(rays_pts_emb[:,:3])
@@ -125,6 +146,7 @@ class Deformation(nn.Module):
             pts = rays_pts_emb[:,:3]
             dx = None
         else:
+            # dx = self.forward_motion(rays_pts_emb[:,:3], time_emb)
             dx = self.pos_deform(hidden) # [N, 3]
             pts = torch.zeros_like(rays_pts_emb[:,:3])
             pts = rays_pts_emb[:,:3]*mask + dx
@@ -183,6 +205,7 @@ class Deformation(nn.Module):
             if  "grid" in name:
                 parameter_list.append(param)
         return parameter_list
+    
 class deform_network(nn.Module):
     def __init__(self, args) :
         super(deform_network, self).__init__()
@@ -192,14 +215,15 @@ class deform_network(nn.Module):
         posbase_pe= args.posebase_pe
         scale_rotation_pe = args.scale_rotation_pe
         opacity_pe = args.opacity_pe
-        timenet_width = args.timenet_width
+        # timenet_width = args.timenet_width
         timenet_output = args.timenet_output
         grid_pe = args.grid_pe
-        times_ch = 2*timebase_pe+1
-        self.timenet = nn.Sequential(
-        nn.Linear(times_ch, timenet_width), nn.ReLU(),
-        nn.Linear(timenet_width, timenet_output))
-        self.deformation_net = Deformation(W=net_width, D=defor_depth, input_ch=(3)+(3*(posbase_pe))*2, grid_pe=grid_pe, input_ch_time=timenet_output, args=args)
+        # times_ch = 2*timebase_pe+1
+        # self.timenet = nn.Sequential(
+        # nn.Linear(times_ch, timenet_width), nn.ReLU(),
+        # nn.Linear(timenet_width, timenet_output))
+        self.deformation_net = Deformation(W=net_width, D=defor_depth, input_ch=(3)+(3*(posbase_pe))*2, grid_pe=grid_pe, 
+                                           input_ch_time=timenet_output, args=args)
         self.register_buffer('time_poc', torch.FloatTensor([(2**i) for i in range(timebase_pe)]))
         self.register_buffer('pos_poc', torch.FloatTensor([(2**i) for i in range(posbase_pe)]))
         self.register_buffer('rotation_scaling_poc', torch.FloatTensor([(2**i) for i in range(scale_rotation_pe)]))
@@ -209,17 +233,22 @@ class deform_network(nn.Module):
 
     def forward(self, point, scales=None, rotations=None, opacity=None, shs=None, times_sel=None, mask=None):
         return self.forward_dynamic(point, scales, rotations, opacity, shs, times_sel, mask)
+    
     @property
     def get_aabb(self):
-        
         return self.deformation_net.get_aabb
+    
     @property
     def get_empty_ratio(self):
         return self.deformation_net.get_empty_ratio
+    
+    def forward_motion(self, points, times):
+        return self.deformation_net.forward_motion(points, times)
         
     def forward_static(self, points):
         points = self.deformation_net(points)
         return points
+    
     def forward_dynamic(self, point, scales=None, rotations=None, opacity=None, shs=None, times_sel=None, mask=None):
         ## times_emb = poc_fre(times_sel, self.time_poc)
         point_emb = poc_fre(point,self.pos_poc)
@@ -237,7 +266,7 @@ class deform_network(nn.Module):
                                                 times_sel, 
                                                 mask) # [N, 1]
     def get_mlp_parameters(self):
-        return self.deformation_net.get_mlp_parameters() + list(self.timenet.parameters())
+        return self.deformation_net.get_mlp_parameters() #+ list(self.timenet.parameters())
     def get_grid_parameters(self):
         return self.deformation_net.get_grid_parameters()
 

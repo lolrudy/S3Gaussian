@@ -62,6 +62,8 @@ class CameraInfo(NamedTuple):
     c2w: np.array = None
     gt_bboxes: list = None
     dynamic_mask_seman: np.array = None
+    vehicle_points: np.array = None
+    vehicle_colors: np.array = None
 
 class SceneInfo(NamedTuple):
     point_cloud: BasicPointCloud
@@ -84,6 +86,82 @@ class SceneInfo(NamedTuple):
     vehicle_pcd_dict: dict = None
     static_vehicle_pcd: BasicPointCloud = None
     vehicle_init_pose_dict: dict = None
+    vehicle_pcd: BasicPointCloud = None
+
+from sklearn.cluster import DBSCAN
+
+def remove_outliers_dbscan(points, eps=0.5, min_samples=20):
+    """
+    使用DBSCAN算法去除外点。
+
+    :param points: 点云数据，形状为 (N, 3) 的 NumPy 数组
+    :param eps: DBSCAN算法的eps参数，控制邻域的大小
+    :param min_samples: DBSCAN算法的min_samples参数，控制核心点的最小样本数
+    :return: 去除外点后的点云数据
+    """
+    # 使用DBSCAN算法进行聚类
+    db = DBSCAN(eps=eps, min_samples=min_samples).fit(points)
+    
+    # 获取每个点的标签
+    labels = db.labels_
+    
+    # 筛选出属于核心点或边界点的点（标签不为-1）    
+    return labels != -1
+
+# def remove_outliers(points, std_multiplier=3, loop=3):
+#     """
+#     通过计算每个点到点云中心的距离去除外点。
+
+#     :param points: 点云数据，形状为 (N, 3) 的 NumPy 数组
+#     :param std_multiplier: 标准差的倍数，用于确定阈值
+#     :return: 去除外点后的点云数据
+#     """
+#     mask = np.ones([len(points)], dtype=bool)
+#     for _ in range(loop):
+#         # 计算点云的中心
+#         center = np.mean(points, axis=0)
+        
+#         # 计算每个点到中心的距离
+#         distances = np.linalg.norm(points - center, axis=1)
+        
+#         # 计算距离的标准差
+#         std_distance = np.std(distances)
+        
+#         # 自适应确定阈值
+#         threshold = std_multiplier * std_distance
+        
+#         mask[mask] = distances <= threshold
+        
+#         points = points[distances <= threshold]
+    
+#     return mask
+
+
+# from scipy.spatial import KDTree
+
+# def statistical_outlier_removal(points, mean_k=5, std_dev_mul=3.0):
+#     """
+#     基于统计滤波去除点云中的外点
+
+#     :param points: 点云数据，形状为 (N, 3) 的 numpy 数组
+#     :param mean_k: 计算平均距离时考虑的邻近点数量
+#     :param std_dev_mul: 标准差倍数阈值
+#     :return: 内点掩码
+#     """
+#     # 计算每个点的邻近点平均距离
+#     tree = KDTree(points)
+#     distances, _ = tree.query(points, k=mean_k)
+#     mean_distances = np.mean(distances[:, 1:], axis=1)  # 排除自身点
+
+#     # 计算平均距离的均值和标准差
+#     mean_distance = np.mean(mean_distances)
+#     std_distance = np.std(mean_distances)
+
+#     # 计算阈值
+#     threshold = mean_distance + std_dev_mul * std_distance
+
+#     return mean_distances <= threshold
+
 
 def getNerfppNorm(cam_info):
     def get_center_and_diag(cam_centers):
@@ -611,7 +689,9 @@ def constructCameras_waymo(frames_list, white_background, mapper = {},
                         intrinsic=intrinsic if load_intrinsic else None,
                         c2w=c2w if load_c2w else None,
                         gt_bboxes=frame['gt_bboxes'],
-                        dynamic_mask_seman=dynamic_mask_seman
+                        dynamic_mask_seman=dynamic_mask_seman,
+                        vehicle_points = frame["vehicle_points"],
+                        vehicle_colors = frame["vehicle_colors"],
                          ))
             
     return cam_infos
@@ -858,7 +938,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
         # origins, directions, points, ranges, laser_ids = [], [], [], [], []
         points, dynamic_points, dynamic_point_masks = [], [], []
         thing_point_maps = []
-        sky_points, road_points, vehicle_points = [], [], []
+        sky_points, vehicle_colors_list, vehicle_points_list = [], [], []
         shs, dynamic_shs = [], []
         depth_maps = []
         accumulated_num_original_rays = 0
@@ -894,11 +974,11 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                 # TODO foreground background
                 # transform world-lidar to pixel-depth-map
                 rgb_point = np.random.random((len(lidar_points), 3))
+                gt_bboxes = []
                 if args.load_gt_bbox:
                     gt_bbox_path = os.path.join(data_root, "gt_bbox", f"{t:03d}.json")
                     with open(gt_bbox_path, 'r') as file:
                         gt_bbox_origin = json.load(file)
-                    gt_bboxes = []
                     for box in gt_bbox_origin:
                         if box['type'] != 'vehicle' or box['is_moving'] == False:
                             continue
@@ -998,53 +1078,86 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                     
                     vehicle_moving_mask = np.zeros(len(pixel_points))
                     
-                    gt_bboxes_vis = []
-                    for box in gt_bboxes:
-                        box_center = box['translation']
-                        camera_center = w2c[:3, :3] @ box_center + w2c[:3, 3:4].T
-                        proj_center = intrinsics[int(len(camera_list))*t + idx] @ camera_center.T
-                        proj_center = proj_center[:2] / proj_center[2]
-                        proj_center = proj_center.squeeze()
-                        valid = (
-                        (proj_center[0] >= 0)
-                        & (proj_center[0] < load_size[1])
-                        & (proj_center[1] >= 0)
-                        & (proj_center[1] < load_size[0])
-                        )   
-                        proj_center = proj_center.astype(np.int32)
-                        if not valid:
-                            continue
-                        if thing_mask[proj_center[1], proj_center[0]] != THING.VEHICLE:
-                            continue
-                        gt_bboxes_vis.append(box)
-                        instance_id = instance_mask[proj_center[1], proj_center[0]]
-                        cid = semantic_mask[proj_center[1], proj_center[0]]
-                        box_mask = (instance_mask == instance_id) & (semantic_mask == cid)
-                        # TODO DYNAMIC MASK
-                        dynamic_mask[box_mask] = True
-                        box_point_mask = box_mask[image_points[:, 1].astype(np.int32), image_points[:, 0].astype(np.int32)]
-                        color = image[image_points[:, 1].astype(np.int32), image_points[:, 0].astype(np.int32)]
-                        box_lidar_points = lidar_points[pixel_points_mask1][box_point_mask]
-                        diameter = np.linalg.norm(box['size'])
-                        thr = diameter / 2 * args.vehicle_extent
-                        center_dist = np.linalg.norm(box_lidar_points.T - np.expand_dims(box['translation'], -1), axis=0)
-                        box_point_mask[box_point_mask] = center_dist < thr
-                        box_lidar_points = lidar_points[pixel_points_mask1][box_point_mask]
-                        color_lidar_points = color[box_point_mask]
+                    if args.load_gt_bbox:
+                        gt_bboxes_vis = []
+                        for box in gt_bboxes:
+                            box_center = box['translation']
+                            camera_center = w2c[:3, :3] @ box_center + w2c[:3, 3:4].T
+                            proj_center = intrinsics[int(len(camera_list))*t + idx] @ camera_center.T
+                            proj_center = proj_center[:2] / proj_center[2]
+                            proj_center = proj_center.squeeze()
+                            valid = (
+                            (proj_center[0] >= 0)
+                            & (proj_center[0] < load_size[1])
+                            & (proj_center[1] >= 0)
+                            & (proj_center[1] < load_size[0])
+                            )   
+                            proj_center = proj_center.astype(np.int32)
+                            if not valid:
+                                continue
+                            if thing_mask[proj_center[1], proj_center[0]] != THING.VEHICLE:
+                                continue
+                            gt_bboxes_vis.append(box)
+                            instance_id = instance_mask[proj_center[1], proj_center[0]]
+                            cid = semantic_mask[proj_center[1], proj_center[0]]
+                            box_mask = (instance_mask == instance_id) & (semantic_mask == cid)
+                            # TODO DYNAMIC MASK
+                            dynamic_mask[box_mask] = True
+                            box_point_mask = box_mask[image_points[:, 1].astype(np.int32), image_points[:, 0].astype(np.int32)]
+                            color = image[image_points[:, 1].astype(np.int32), image_points[:, 0].astype(np.int32)]
+                            box_lidar_points = lidar_points[pixel_points_mask1][box_point_mask]
+                            diameter = np.linalg.norm(box['size'])
+                            thr = diameter / 2 * args.vehicle_extent
+                            center_dist = np.linalg.norm(box_lidar_points.T - np.expand_dims(box['translation'], -1), axis=0)
+                            box_point_mask[box_point_mask] = center_dist < thr
+                            box_lidar_points = lidar_points[pixel_points_mask1][box_point_mask]
+                            color_lidar_points = color[box_point_mask]
 
-                        vehicle_moving_mask[box_point_mask] = 1
-                        gid = box['gid']
-                        if gid not in vehicle_points_dict.keys():
-                            vehicle_init_pose_dict[gid] = box
-                            vehicle_points_dict[gid] = box_lidar_points
-                            vehicle_colors_dict[gid] = color_lidar_points
+                            vehicle_moving_mask[box_point_mask] = 1
+                            gid = box['gid']
+                            if gid not in vehicle_points_dict.keys():
+                                vehicle_init_pose_dict[gid] = box
+                                vehicle_points_dict[gid] = box_lidar_points
+                                vehicle_colors_dict[gid] = color_lidar_points
+                            else:
+                                init_box = vehicle_init_pose_dict[gid]
+                                canonicalized_lidar_points = box['rotation'].T @ (box_lidar_points.T - np.expand_dims(box['translation'], -1))
+                                init_lidar_points = init_box['rotation'] @ canonicalized_lidar_points + np.expand_dims(init_box['translation'], -1)
+                                vehicle_points_dict[gid] = np.concatenate([vehicle_points_dict[gid], init_lidar_points.T], axis=0)
+                                vehicle_colors_dict[gid] = np.concatenate([vehicle_colors_dict[gid], color_lidar_points], axis=0)
+                    else:
+                        vehicle_points = []
+                        vehicle_colors = []
+                        for obj_id in VEHICLE_ID:
+                            for inst_id in np.unique(instance_mask[semantic_mask == obj_id]):
+                                instance_point_map = ((instance_mask[image_points[:, 1].astype(np.int32), image_points[:, 0].astype(np.int32)] == inst_id)
+                                                      & (semantic_mask[image_points[:, 1].astype(np.int32), image_points[:, 0].astype(np.int32)] == obj_id))
+                                
+                                curr_points = lidar_points[pixel_points_mask1][instance_point_map]
+                                if len(curr_points) > 5:
+                                    # inlier_mask = statistical_outlier_removal(curr_points, mean_k=5)
+                                    # inlier_mask = remove_outliers(curr_points, std_multiplier=2)
+                                    inlier_mask = remove_outliers_dbscan(curr_points)
+                                    curr_points = curr_points[inlier_mask]
+                                    curr_colors = rgb_point[pixel_points_mask1][instance_point_map][inlier_mask]
+                                else:
+                                    curr_colors = rgb_point[pixel_points_mask1][instance_point_map]
+                                vehicle_points.append(curr_points)
+                                vehicle_colors.append(curr_colors)
+                                assert len(curr_points) == len(curr_colors)
+                                
+                        if len(vehicle_points):
+                            vehicle_points = np.concatenate(vehicle_points, axis=0)
+                            vehicle_colors = np.concatenate(vehicle_colors, axis=0)
+                            dynamic_mask[thing_mask == THING.VEHICLE] = True
                         else:
-                            init_box = vehicle_init_pose_dict[gid]
-                            canonicalized_lidar_points = box['rotation'].T @ (box_lidar_points.T - np.expand_dims(box['translation'], -1))
-                            init_lidar_points = init_box['rotation'] @ canonicalized_lidar_points + np.expand_dims(init_box['translation'], -1)
-                            vehicle_points_dict[gid] = np.concatenate([vehicle_points_dict[gid], init_lidar_points.T], axis=0)
-                            vehicle_colors_dict[gid] = np.concatenate([vehicle_colors_dict[gid], color_lidar_points], axis=0)
-                    
+                            vehicle_points = np.zeros([0,3])
+                            vehicle_colors = np.zeros([0,3])
+
+                        # vehicle_points = lidar_points[thing_point_map == THING.VEHICLE]
+                        # vehicle_colors = rgb_point[thing_point_map == THING.VEHICLE]
+                        vehicle_points_list.append(vehicle_points)
+                        vehicle_colors_list.append(vehicle_colors)
                     # gt_bboxes_list.append(gt_bboxes_vis)
                     gt_bboxes_list.append(gt_bboxes)
                     vis_mask[pixel_points_mask1] = (vis_mask[pixel_points_mask1] > 0) & (vehicle_moving_mask == 0)
@@ -1175,21 +1288,32 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
             sky_points[:, 0] = xv.flatten()
             sky_points[:, 1] = yv.flatten()
             sky_points[:, 2] = args.sky_height
-            sky_pcd = BasicPointCloud(points=sky_points, colors=SH2RGB(sky_colors), 
+            sky_pcd = BasicPointCloud(points=sky_points, colors=sky_colors, 
                                        normals=np.zeros((sky_pts_num, 3)))
             dynamic_pcd = BasicPointCloud(points=dynamic_points, colors=SH2RGB(dynamic_shs), normals=np.zeros((len(dynamic_points), 3))) 
             
-            static_vehicle_points = points[static_thing_maps==THING.VEHICLE]
-            static_vehicle_shs = shs[static_thing_maps==THING.VEHICLE]
-            static_vehicle_pcd = BasicPointCloud(points=static_vehicle_points, colors=SH2RGB(static_vehicle_shs), 
-                                       normals=np.zeros_like(static_vehicle_points))
+            if args.load_gt_bbox:
+                static_vehicle_points = points[static_thing_maps==THING.VEHICLE]
+                static_vehicle_shs = shs[static_thing_maps==THING.VEHICLE]
+                static_vehicle_pcd = BasicPointCloud(points=static_vehicle_points, colors=SH2RGB(static_vehicle_shs), 
+                                        normals=np.zeros_like(static_vehicle_points))
+            else:
+                static_vehicle_pcd = None
             points = points[static_thing_maps==THING.STATIC_OBJECT]
             shs = shs[static_thing_maps==THING.STATIC_OBJECT]
-            vehicle_pcd_dict = {}
-            for key in vehicle_points_dict.keys():
-                # TODO DOWNSAMPLE EACH CAR
-                vehicle_pcd_dict[key] = BasicPointCloud(points=vehicle_points_dict[key], colors=vehicle_colors_dict[key], 
-                                       normals=np.zeros_like(vehicle_points_dict[key]))
+            if args.load_gt_bbox:
+                vehicle_pcd_dict = {}
+                for key in vehicle_points_dict.keys():
+                    # TODO DOWNSAMPLE EACH CAR
+                    vehicle_pcd_dict[key] = BasicPointCloud(points=vehicle_points_dict[key], colors=vehicle_colors_dict[key], 
+                                        normals=np.zeros_like(vehicle_points_dict[key]))
+            else:
+                vehicle_pcd_dict = None
+                vehicle_pcd = None
+                # vehicle_points = np.concatenate(vehicle_points_list, axis=0)
+                # vehicle_colors = np.concatenate(vehicle_colors_list, axis=0)
+                # vehicle_pcd = BasicPointCloud(points=vehicle_points, colors=vehicle_colors, 
+                #                        normals=np.zeros((len(vehicle_points), 3)))
                 
         else:
             dynamic_pcd = None
@@ -1235,6 +1359,8 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                             dynamic_mask_path = dynamic_mask_filepaths[train_idx[idx]] if load_dynamic_mask else None,
                             gt_bboxes = gt_bboxes_list[train_idx[idx]] if len(gt_bboxes_list)>0 else None,
                             dynamic_mask = dynamic_mask_seman_list[train_idx[idx]] if len(dynamic_mask_seman_list)>0 else None,
+                            vehicle_points = vehicle_points_list[train_idx[idx]] if len(vehicle_points_list)>0 else None,
+                            vehicle_colors=vehicle_colors_list[train_idx[idx]] if len(vehicle_colors_list)>0 else None,
         )
         train_frames_list.append(frame_dict)
     for idx, t in enumerate(test_timestamps):
@@ -1252,7 +1378,8 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                             dynamic_mask_path = dynamic_mask_filepaths[test_idx[idx]] if load_dynamic_mask else None,
                             gt_bboxes = gt_bboxes_list[test_idx[idx]] if len(gt_bboxes_list)>0 else None,
                             dynamic_mask = dynamic_mask_seman_list[test_idx[idx]] if len(dynamic_mask_seman_list)>0 else None,
-
+                            vehicle_points = vehicle_points_list[test_idx[idx]] if len(vehicle_points_list)>0 else None,
+                            vehicle_colors=vehicle_colors_list[test_idx[idx]] if len(vehicle_colors_list)>0 else None,
         )
         test_frames_list.append(frame_dict)
     if len(test_timestamps)==0:
@@ -1273,7 +1400,8 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                                 dynamic_mask_path = dynamic_mask_filepaths[full_idx[idx]] if load_dynamic_mask else None,
                                 gt_bboxes = gt_bboxes_list[full_idx[idx]] if len(gt_bboxes_list)>0 else None,
                                 dynamic_mask = dynamic_mask_seman_list[full_idx[idx]] if len(dynamic_mask_seman_list)>0 else None,
-
+                                vehicle_points = vehicle_points_list[full_idx[idx]] if len(vehicle_points_list)>0 else None,
+                                vehicle_colors=vehicle_colors_list[full_idx[idx]] if len(vehicle_colors_list)>0 else None,
             )
             full_frames_list.append(frame_dict)
     
@@ -1344,7 +1472,8 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                            sky_pcd = sky_pcd,
                            static_vehicle_pcd=static_vehicle_pcd,
                            vehicle_pcd_dict=vehicle_pcd_dict,
-                           vehicle_init_pose_dict=vehicle_init_pose_dict
+                           vehicle_init_pose_dict=vehicle_init_pose_dict,
+                           vehicle_pcd=vehicle_pcd
                            )
 
     return scene_info

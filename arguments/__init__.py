@@ -79,7 +79,7 @@ class ModelParams(ParamGroup):
         self.num_classes = 200
         self.load_intrinsic = False
         self.load_c2w = False
-        self.load_gt_bbox = True
+        self.load_gt_bbox = 1
         # occ grid
         self.save_occ_grid = True
         self.occ_voxel_size = 0.4
@@ -90,6 +90,11 @@ class ModelParams(ParamGroup):
         self.sky_height = 20
 
         self.filter_vis_point = 0
+        
+        self.add_cd_thr = 10
+        self.connect_thr = 0.1
+        self.motion_epoch = 5
+        self.add_point_thr = 10
 
         super().__init__(parser, "Loading Parameters", sentinel)
 
@@ -113,6 +118,7 @@ class OptimizationParams(ParamGroup):
         self.iterations = 50_000 # 30_000
         self.coarse_iterations = 20_000
         self.eval_iterations = 10_000
+        self.motion_iterations = 20_000
         self.remove_interval = 1000
 
         self.position_lr_init = 0.00016

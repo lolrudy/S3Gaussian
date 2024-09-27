@@ -88,25 +88,25 @@ class SceneInfo(NamedTuple):
     vehicle_init_pose_dict: dict = None
     vehicle_pcd: BasicPointCloud = None
 
-from sklearn.cluster import DBSCAN
+# from sklearn.cluster import DBSCAN
 
-def remove_outliers_dbscan(points, eps=0.5, min_samples=20):
-    """
-    使用DBSCAN算法去除外点。
+# def remove_outliers_dbscan(points, eps=0.5, min_samples=20):
+#     """
+#     使用DBSCAN算法去除外点。
 
-    :param points: 点云数据，形状为 (N, 3) 的 NumPy 数组
-    :param eps: DBSCAN算法的eps参数，控制邻域的大小
-    :param min_samples: DBSCAN算法的min_samples参数，控制核心点的最小样本数
-    :return: 去除外点后的点云数据
-    """
-    # 使用DBSCAN算法进行聚类
-    db = DBSCAN(eps=eps, min_samples=min_samples).fit(points)
+#     :param points: 点云数据，形状为 (N, 3) 的 NumPy 数组
+#     :param eps: DBSCAN算法的eps参数，控制邻域的大小
+#     :param min_samples: DBSCAN算法的min_samples参数，控制核心点的最小样本数
+#     :return: 去除外点后的点云数据
+#     """
+#     # 使用DBSCAN算法进行聚类
+#     db = DBSCAN(eps=eps, min_samples=min_samples).fit(points)
     
-    # 获取每个点的标签
-    labels = db.labels_
+#     # 获取每个点的标签
+#     labels = db.labels_
     
-    # 筛选出属于核心点或边界点的点（标签不为-1）    
-    return labels != -1
+#     # 筛选出属于核心点或边界点的点（标签不为-1）    
+#     return labels != -1
 
 # def remove_outliers(points, std_multiplier=3, loop=3):
 #     """
@@ -531,33 +531,6 @@ def constructCameras_waymo(frames_list, white_background, mapper = {},
         dynamic_mask_seman = frame['dynamic_mask']
 
         # ------------------
-        # load semantic mask
-        # ------------------
-        # semantic_mask_path, semantic_mask = frame["semantic_mask_path"], None
-        # if semantic_mask_path is not None:
-        #     # semantic_mask = np.load(semantic_mask_path)
-        #     # semantic_mask = Image.fromarray(semantic_mask.squeeze(-1))
-        #     semantic_mask = Image.open(semantic_mask_path)
-        #     semantic_mask = semantic_mask.resize(load_size, Image.NEAREST)
-        #     semantic_mask = np.array(semantic_mask)
-                    
-        #     # to numpy
-        #     #semantic_mask = np.array(semantic_mask)#  .unsqueeze(-1)
-
-        # # ------------------
-        # # load instance mask
-        # # ------------------
-        # instance_mask_path, instance_mask = frame["instance_mask_path"], None
-        # if instance_mask_path is not None:
-        #     # instance_mask = np.load(instance_mask_path)
-        #     # instance_mask = Image.fromarray(instance_mask.squeeze(-1))
-        #     instance_mask = Image.open(instance_mask_path)
-        #     instance_mask = instance_mask.resize(load_size, Image.NEAREST)
-        #     instance_mask = np.array(instance_mask)
-        #     # to numpy
-        #     #instance_mask = np.array(instance_mask) #.unsqueeze(-1)
-
-        # ------------------
         # load sam mask
         # ------------------
         sam_mask_path, sam_mask = frame["sam_mask_path"], None
@@ -578,105 +551,9 @@ def constructCameras_waymo(frames_list, white_background, mapper = {},
             #dynamic_mask = np.array(dynamic_mask) #.unsqueeze(-1)
 
         # ------------------
-        # load feat map
+        # NO load feat map
         # ------------------
         feat_map_path, feat_map = frame["feat_map_path"], None
-        if feat_map_path is not None:
-            # mmap_mode="r" is to avoid memory overflow when loading features
-            # but it only slightly helps... do we have a better way to load features?
-            features = np.load(feat_map_path, mmap_mode="r").squeeze()
-            features = torch.from_numpy(features).unsqueeze(0).float()
-
-            # shape: (num_imgs, num_patches_h, num_patches_w, C)
-            # featmap_downscale_factor is used to convert the image coordinates to ViT feature coordinates.
-            # resizing ViT features to (H, W) using bilinear interpolation is infeasible.
-            # imagine a feature array of shape (num_timesteps x num_cams, 640, 960, 768). it's too large to fit in GPU memory.
-            featmap_downscale_factor = (
-                features.shape[1] / 640,
-                features.shape[2] / 960,
-            )
-            # print(
-            #     f"Loaded {features.shape} dinov2_vitb14 features."
-            # )
-            # print(f"Feature scale: {featmap_downscale_factor}")
-            # print(f"Computing features PCA...")
-            # compute feature visualization matrix
-            C = features.shape[-1]
-            # no need to compute PCA on the entire set of features, we randomly sample 100k features
-            temp_feats = features.reshape(-1, C)
-            max_elements_to_compute_pca = min(100000, temp_feats.shape[0])
-            selected_features = temp_feats[
-                np.random.choice(
-                    temp_feats.shape[0], max_elements_to_compute_pca, replace=False
-                )
-            ]
-            target_feature_dim = 3
-            device='cuda'
-            if target_feature_dim is not None:
-                # print(
-                #     f"Reducing features to {target_feature_dim} dimensions."
-                # )
-                # compute PCA to reduce the feature dimension to target_feature_dim
-                U, S, reduce_to_target_dim_mat = torch.pca_lowrank(
-                    selected_features, q=target_feature_dim, niter=20
-                )
-                # compute the fraction of variance explained by target_feature_dim
-                variances = S**2
-                fraction_var_explained = variances / variances.sum()
-                # print(f"[PCA] fraction_var_explained: \n{fraction_var_explained}")
-                # print(
-                #     f"[PCA] fraction_var_explained sum: {fraction_var_explained.sum()}",
-                # )
-                reduce_to_target_dim_mat = reduce_to_target_dim_mat
-
-                # reduce the features to target_feature_dim
-                selected_features = selected_features @ reduce_to_target_dim_mat
-                features =  features @ reduce_to_target_dim_mat
-                C = features.shape[-1]
-
-                # normalize the reduced features to [0, 1] along each dimension
-                feat_min = features.reshape(-1, C).min(dim=0)[0]
-                feat_max = features.reshape(-1, C).max(dim=0)[0]
-                features = (features - feat_min) / (feat_max - feat_min)
-                selected_features = (selected_features - feat_min) / (feat_max - feat_min)
-                feat_min = feat_min.to(device)
-                feat_max = feat_max.to(device)
-                reduce_to_target_dim_mat = reduce_to_target_dim_mat.to(device)
-            # we compute the first 3 principal components of the ViT features as the color
-            reduction_mat, feat_color_min, feat_color_max = get_robust_pca(
-                selected_features
-            )
-            # final features are of shape (num_imgs, num_patches_h, num_patches_w, target_feature_dim)
-            features = features
-
-            # save visualization parameters
-            feat_dimension_reduction_mat = reduction_mat
-            feat_color_min = feat_color_min
-            feat_color_max = feat_color_max
-            del temp_feats, selected_features
-
-            # print(
-            #     f"Feature PCA computed, shape: {feat_dimension_reduction_mat.shape}"
-            # )
-            # tensor: [91, 137, 64]
-            x, y = torch.meshgrid(
-                torch.arange(image.size[0]),
-                torch.arange(image.size[1]),
-                indexing="xy",
-            )
-            x, y = x.flatten(), y.flatten()
-            x, y = x.to(device), y.to(device)
-
-            # we compute the nearest DINO feature for each pixel
-            # map (x, y) in the (W, H) space to (x * dino_scale[0], y * dino_scale[1]) in the (W//patch_size, H//patch_size) space
-            dino_y = (y * featmap_downscale_factor[0]).long()
-            dino_x = (x * featmap_downscale_factor[1]).long()
-            # dino_feats are in CPU memory (because they are huge), so we need to move them to GPU
-            features = features.squeeze()
-            dino_feat = features[dino_y.cpu(), dino_x.cpu()]
-
-            features = dino_feat.reshape(image.size[1], image.size[0], -1)
-            feat_map = features.float()
 
         cam_infos.append(CameraInfo(uid=idx, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
                         image_path=image_path, image_name=image_name, width=image.size[0], height=image.size[1],
@@ -695,6 +572,7 @@ def constructCameras_waymo(frames_list, white_background, mapper = {},
                          ))
             
     return cam_infos
+
 
 def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=False, 
                   load_sky_mask = False, load_panoptic_mask = True, load_sam_mask = False,load_dynamic_mask = False,
@@ -746,19 +624,6 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
             img_filepaths.append(os.path.join(data_root, "images", f"{t:03d}_{cam_idx}.jpg"))
             dynamic_mask_filepaths.append(os.path.join(data_root, "dynamic_masks", f"{t:03d}_{cam_idx}.png"))
             sky_mask_filepaths.append(os.path.join(data_root, "sky_masks", f"{t:03d}_{cam_idx}.png"))
-            #semantic_mask_filepaths.append(os.path.join(data_root, "semantic_masks", f"{t:03d}_{cam_idx}.png"))
-            #instance_mask_filepaths.append(os.path.join(data_root, "instance_masks", f"{t:03d}_{cam_idx}.png"))
-            # if os.path.exists(os.path.join(data_root, "semantic_segs", f"{t:03d}_{cam_idx}.npy")):
-            #     semantic_mask_filepaths.append(os.path.join(data_root, "semantic_segs", f"{t:03d}_{cam_idx}.npy"))
-            # else:
-            #     semantic_mask_filepaths.append(None)
-            # if os.path.exists(os.path.join(data_root, "instance_segs", f"{t:03d}_{cam_idx}.npy")):
-            #     instance_mask_filepaths.append(os.path.join(data_root, "instance_segs", f"{t:03d}_{cam_idx}.npy"))
-            # else:
-            #     instance_mask_filepaths.append(None)
-            # if load_panoptic_mask:
-            #     semantic_mask_filepaths.append(os.path.join(data_root, "panoptic", "semantic_mask", f"{t:03d}_{cam_idx}.png"))
-            #     instance_mask_filepaths.append(os.path.join(data_root, "panoptic", "instance_mask", f"{t:03d}_{cam_idx}.png"))
             if os.path.exists(os.path.join(data_root, "sam_masks", f"{t:03d}_{cam_idx}.jpg")):
                 sam_mask_filepaths.append(os.path.join(data_root, "sam_masks", f"{t:03d}_{cam_idx}.jpg"))
             if os.path.exists(os.path.join(data_root, "dynamic_masks", f"{t:03d}_{cam_idx}.png")):
@@ -768,14 +633,6 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                 
         lidar_filepaths.append(os.path.join(data_root, "lidar", f"{t:03d}.bin"))
 
-    if load_feat_map:
-        return_dict = extract_and_save_features(
-                input_img_path_list=img_filepaths,
-                saved_feat_path_list=feat_map_filepaths,
-                img_shape=[644, 966],
-                stride=7,
-                model_type='dinov2_vitb14',
-            )
     img_filepaths = np.array(img_filepaths)
     dynamic_mask_filepaths = np.array(dynamic_mask_filepaths)
     sky_mask_filepaths = np.array(sky_mask_filepaths)
@@ -822,6 +679,14 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
         # opencv coordinate system: x right, y down, z front
         # waymo coordinate system: x front, y left, z up
         cam_to_egos.append(cam_to_ego @ OPENCV2DATASET) # opencv_cam -> waymo_cam -> waymo_ego
+    
+    # TODO LOAD TRACKING RESULT
+    tracking_results = {}
+    tracking_dir = os.path.join(data_root, 'tracking')
+    for cam_id in camera_list:
+        tracking_results[cam_id] = np.load(os.path.join(tracking_dir, f'view-{cam_id}.pkl'), allow_pickle=True)
+        
+    
     # compute per-image poses and intrinsics
     cam_to_worlds, ego_to_worlds = [], []
     intrinsics, cam_ids = [], []
@@ -916,7 +781,8 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
     # bg-gs settings
     #use_bg_gs = False
     bg_scale = 2.0 # used to scale fg-aabb
-    if not os.path.exists(pts_path) or not load_lidar:
+    if not os.path.exists(pts_path):
+        print('no initial point cloud provided!')
         # random sample
         # Since this data set has no colmap data, we start with random points
         #num_pts = 2000
@@ -932,7 +798,6 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
         print('xyz max: ', np.max(xyz, axis=0))
         shs = np.random.random((num_pts, 3)) / 255.0
         pcd = BasicPointCloud(points=xyz, colors=SH2RGB(shs), normals=np.zeros((num_pts, 3)))
-    # storePly(ply_path, xyz, SH2RGB(shs) * 255)
     else:
         # load lidar points
         # origins, directions, points, ranges, laser_ids = [], [], [], [], []
@@ -970,6 +835,9 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                 lidar_to_worlds[t][:3, :3] @ lidar_points.T
                 + lidar_to_worlds[t][:3, 3:4]
             ).T
+            depth_maps_t = {}
+            pixel_point_mask_t = {}
+            image_points_t = {}
             if load_depthmap:
                 # TODO foreground background
                 # transform world-lidar to pixel-depth-map
@@ -991,7 +859,6 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                         gt_bboxes.append(box)
                 for idx, cam_idx in enumerate(camera_list):
                     if split_dynamic:
-                        # TODO LOAD TRACKING RESULT
                         # dynamic_mask = Image.open(os.path.join(data_root, "dynamic_masks", f"{t:03d}_{cam_idx}.png"))
                         # dynamic_mask = dynamic_mask.resize(load_size[::-1], Image.NEAREST)
                         # dynamic_mask = np.array(dynamic_mask) / 255
@@ -1126,43 +993,50 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                                 vehicle_points_dict[gid] = np.concatenate([vehicle_points_dict[gid], init_lidar_points.T], axis=0)
                                 vehicle_colors_dict[gid] = np.concatenate([vehicle_colors_dict[gid], color_lidar_points], axis=0)
                     else:
-                        vehicle_points = []
-                        vehicle_colors = []
-                        for obj_id in VEHICLE_ID:
-                            for inst_id in np.unique(instance_mask[semantic_mask == obj_id]):
-                                instance_point_map = ((instance_mask[image_points[:, 1].astype(np.int32), image_points[:, 0].astype(np.int32)] == inst_id)
-                                                      & (semantic_mask[image_points[:, 1].astype(np.int32), image_points[:, 0].astype(np.int32)] == obj_id))
+                        depth_maps_t[cam_idx] = depth_map
+                        pixel_point_mask_t[cam_idx] = pixel_points_mask1
+                        image_points_t[cam_idx] = image_points
+                        # vehicle_points = []
+                        # vehicle_colors = []
+                        # for obj_id in VEHICLE_ID:
+                        #     for inst_id in np.unique(instance_mask[semantic_mask == obj_id]):
+                        #         instance_point_map = ((instance_mask[image_points[:, 1].astype(np.int32), image_points[:, 0].astype(np.int32)] == inst_id)
+                        #                               & (semantic_mask[image_points[:, 1].astype(np.int32), image_points[:, 0].astype(np.int32)] == obj_id))
                                 
-                                curr_points = lidar_points[pixel_points_mask1][instance_point_map]
-                                if len(curr_points) > 5:
-                                    # inlier_mask = statistical_outlier_removal(curr_points, mean_k=5)
-                                    # inlier_mask = remove_outliers(curr_points, std_multiplier=2)
-                                    inlier_mask = remove_outliers_dbscan(curr_points)
-                                    curr_points = curr_points[inlier_mask]
-                                    curr_colors = rgb_point[pixel_points_mask1][instance_point_map][inlier_mask]
-                                else:
-                                    curr_colors = rgb_point[pixel_points_mask1][instance_point_map]
-                                vehicle_points.append(curr_points)
-                                vehicle_colors.append(curr_colors)
-                                assert len(curr_points) == len(curr_colors)
+                        #         curr_points = lidar_points[pixel_points_mask1][instance_point_map]
+                        #         if len(curr_points) > 5:
+                        #             # inlier_mask = statistical_outlier_removal(curr_points, mean_k=5)
+                        #             # inlier_mask = remove_outliers(curr_points, std_multiplier=2)
+                        #             inlier_mask = remove_outliers_dbscan(curr_points)
+                        #             curr_points = curr_points[inlier_mask]
+                        #             curr_colors = rgb_point[pixel_points_mask1][instance_point_map][inlier_mask]
+                        #         else:
+                        #             curr_colors = rgb_point[pixel_points_mask1][instance_point_map]
+                        #         vehicle_points.append(curr_points)
+                        #         vehicle_colors.append(curr_colors)
+                        #         assert len(curr_points) == len(curr_colors)
                                 
-                        if len(vehicle_points):
-                            vehicle_points = np.concatenate(vehicle_points, axis=0)
-                            vehicle_colors = np.concatenate(vehicle_colors, axis=0)
-                            dynamic_mask[thing_mask == THING.VEHICLE] = True
-                        else:
-                            vehicle_points = np.zeros([0,3])
-                            vehicle_colors = np.zeros([0,3])
+                        # if len(vehicle_points):
+                        #     vehicle_points = np.concatenate(vehicle_points, axis=0)
+                        #     vehicle_colors = np.concatenate(vehicle_colors, axis=0)
+                        #     dynamic_mask[thing_mask == THING.VEHICLE] = True
+                        # else:
+                        #     vehicle_points = np.zeros([0,3])
+                        #     vehicle_colors = np.zeros([0,3])
 
-                        # vehicle_points = lidar_points[thing_point_map == THING.VEHICLE]
-                        # vehicle_colors = rgb_point[thing_point_map == THING.VEHICLE]
-                        vehicle_points_list.append(vehicle_points)
-                        vehicle_colors_list.append(vehicle_colors)
+                        # # vehicle_points = lidar_points[thing_point_map == THING.VEHICLE]
+                        # # vehicle_colors = rgb_point[thing_point_map == THING.VEHICLE]
+                        # vehicle_points_list.append(vehicle_points)
+                        # vehicle_colors_list.append(vehicle_colors)
                     # gt_bboxes_list.append(gt_bboxes_vis)
                     gt_bboxes_list.append(gt_bboxes)
                     vis_mask[pixel_points_mask1] = (vis_mask[pixel_points_mask1] > 0) & (vehicle_moving_mask == 0)
                     dynamic_mask_seman_list.append(dynamic_mask)
-                    
+                
+                # TODO ASSOCIATE TRACKING RESULT IN 3 FRAMES & INIT VEHICLE POINT CLOUD
+                if not args.load_gt_bbox:
+                    k=0
+                    raise NotImplemented
                                         
             # # compute lidar directions
             # lidar_directions = lidar_points - lidar_origins

@@ -90,11 +90,6 @@ class ModelParams(ParamGroup):
         self.sky_height = 20
 
         self.filter_vis_point = 0
-        
-        self.add_cd_thr = 10
-        self.connect_thr = 0.1
-        self.motion_epoch = 5
-        self.add_point_thr = 10
 
         super().__init__(parser, "Loading Parameters", sentinel)
 

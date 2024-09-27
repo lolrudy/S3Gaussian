@@ -19,7 +19,7 @@
                 "--model_path",
                 "work_dirs/phase1/dynamic/recon/016_debug1",
                 "--load_gt_bbox=0",
-                "--end_time=19",
+                // "--end_time=49",
                 // "--eval_iterations",
                 // "1100",
                 // "--coarse_iterations",

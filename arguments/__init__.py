@@ -78,7 +78,7 @@ class ModelParams(ParamGroup):
         self.num_classes = 200
         self.load_intrinsic = False
         self.load_c2w = False
-        self.load_gt_bbox = 1
+        self.load_gt_bbox = 0
         # occ grid
         self.save_occ_grid = True
         self.occ_voxel_size = 0.4
@@ -90,7 +90,7 @@ class ModelParams(ParamGroup):
 
         self.filter_vis_point = 0
 
-        self.load_cache = 0
+        self.load_cache = 1
 
         super().__init__(parser, "Loading Parameters", sentinel)
 

@@ -19,11 +19,13 @@
                 "--model_path",
                 "work_dirs/phase1/dynamic/recon/016_debug1",
                 "--load_gt_bbox=0",
-                // "--end_time=49",
+                "--end_time=99",
+                "--num_pts=4_000_000",
+                "--max_pt_num=8_000_000",
                 // "--eval_iterations",
                 // "1100",
-                // "--coarse_iterations",
-                // "0",
+                "--coarse_iterations",
+                "0",
                 // "--lambda_seman_rgb",
                 // "1",
                 // "--coarse_iterations",
@@ -31,14 +33,14 @@
                 // "--start_checkpoint",
                 // "/data3/zrd/project/S3Gaussian/work_dirs/phase1/dynamic/recon/016_seman0_vehicle_sh0/chkpnt_fine_50000.pth",
                 // "--eval_only",
-                "--sh_degree",
-                "0",
-                "--load_intrinsic"
+                "--load_cache",
+                "1"
+                // "--load_intrinsic"
                 // "--lambda_dyn_acc",
                 // "1",
             ],
             "env": {
-                "CUDA_VISIBLE_DEVICES": "4"
+                "CUDA_VISIBLE_DEVICES": "0"
             }
         },
         {

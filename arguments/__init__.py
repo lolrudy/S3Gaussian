@@ -47,7 +47,6 @@ class ParamGroup:
 class ModelParams(ParamGroup): 
     def __init__(self, parser, sentinel=False):
         self.debug_test = False
-        # self.sh_degree = 3
         self._source_path = ""
         self._model_path = ""
         self._images = "images"
@@ -91,6 +90,8 @@ class ModelParams(ParamGroup):
 
         self.filter_vis_point = 0
 
+        self.load_cache = 0
+
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):
@@ -113,7 +114,6 @@ class OptimizationParams(ParamGroup):
         self.iterations = 50_000 # 30_000
         self.coarse_iterations = 20_000
         self.eval_iterations = 10_000
-        self.motion_iterations = 20_000
         self.remove_interval = 1000
 
         self.position_lr_init = 0.00016

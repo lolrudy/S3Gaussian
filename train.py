@@ -448,7 +448,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             loss_dict['tv'] = tv_loss
             loss += tv_loss
         
-        # TODO DEACTIVATE SSIM LOSS WHILE COARSE STAGE
+        # DEACTIVATE SSIM LOSS WHILE COARSE STAGE
         if opt.lambda_dssim != 0 and 'fine' in stage:
             ssim_loss = ssim(image_tensor,gt_image_tensor)
             loss_dict['ssim'] = ssim_loss
@@ -517,17 +517,29 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             loss += loss_dict['seman_loss']
             
         if args.split_dynamic and opt.lambda_vehicle_dx > 0. and 'fine' in stage and iteration < opt.vehicle_dx_reg_iter:
-            gt_bboxes = viewpoint_cam.gt_bboxes
-            dx = render_pkg['dx']
-            vehicle_dx_loss = {}
-            for box in gt_bboxes:
-                if box['gid'] in gaussians.vehicle_init_pose_dict:
-                    init_pose = gaussians.vehicle_init_pose_dict[box['gid']]
-                    vehicle_idx = gaussians.vehicle_gid2idx[box['gid']]
-                    point_mask = gaussians._vehicle_idx_table[gaussians._deformation_table] == vehicle_idx
-                    if point_mask.sum() > 0:
-                        delta_trans = box['translation'] - init_pose['translation']
-                        vehicle_dx_loss[box['gid']] = l1_loss(dx[point_mask], delta_trans.cuda())
+            if args.load_gt_bbox:
+                gt_bboxes = viewpoint_cam.gt_bboxes
+                dx = render_pkg['dx']
+                vehicle_dx_loss = {}
+                for box in gt_bboxes:
+                    if box['gid'] in gaussians.vehicle_init_pose_dict:
+                        init_pose = gaussians.vehicle_init_pose_dict[box['gid']]
+                        vehicle_idx = gaussians.vehicle_gid2idx[box['gid']]
+                        point_mask = gaussians._vehicle_idx_table[gaussians._deformation_table] == vehicle_idx
+                        if point_mask.sum() > 0:
+                            delta_trans = box['translation'] - init_pose['translation']
+                            vehicle_dx_loss[box['gid']] = l1_loss(dx[point_mask], delta_trans.cuda())
+            else:
+                pred_boxes = viewpoint_cam.gt_bboxes
+                dx = render_pkg['dx']
+                vehicle_dx_loss = {}
+                for box in pred_boxes:
+                    if box['gid'] in gaussians.vehicle_init_pose_dict:
+                        vehicle_idx = gaussians.vehicle_gid2idx[box['gid']]
+                        point_mask = gaussians._vehicle_idx_table[gaussians._deformation_table] == vehicle_idx
+                        if point_mask.sum() > 0:
+                            delta_trans = box['translation']
+                            vehicle_dx_loss[box['gid']] = l1_loss(dx[point_mask], delta_trans.cuda())
             loss_dict['vehicle_dx_loss'] = opt.lambda_vehicle_dx * sum(vehicle_dx_loss.values())
             loss += loss_dict['vehicle_dx_loss']
 
@@ -812,7 +824,8 @@ def training_report(tb_writer, iteration, loss_dict, loss, l1_loss, elapsed, tes
     if tb_writer:
         tb_writer.add_scalar(f'{stage}/train_loss_patches/total_loss', loss.item(), iteration)
         for loss_name, loss_value in loss_dict.items():
-            tb_writer.add_scalar(f'{stage}/train_loss_patches/{loss_name}', loss_value.item(), iteration)
+            if loss_value > 0:
+                tb_writer.add_scalar(f'{stage}/train_loss_patches/{loss_name}', loss_value.item(), iteration)
         # tb_writer.add_scalar(f'{stage}/iter_time', elapsed, iteration)
         
     

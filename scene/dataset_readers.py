@@ -541,10 +541,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
 
     online_load = True
     if args.load_cache:
-        cache_dir = os.path.join(data_root, f"cache_{start_time}_{end_time}{'_gt_bbox' if args.load_gt_bbox else ''}")
-        if not os.path.exists(cache_dir):
-            os.makedirs(cache_dir, exist_ok=True)
-        cache_path = os.path.join(cache_dir, "cache.pkl")
+        cache_path = os.path.join(data_root, f"cache_{start_time}_{end_time}{'_gt_bbox' if args.load_gt_bbox else ''}.pkl")
         if os.path.exists(cache_path):
             # read from cache
             print("Reading from cache...")
@@ -674,7 +671,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
             # waymo coordinate system: x front, y left, z up
             cam_to_egos.append(cam_to_ego @ OPENCV2DATASET) # opencv_cam -> waymo_cam -> waymo_ego
         
-        # TODO LOAD TRACKING RESULT
+        # LOAD TRACKING RESULT
         tracking_results = {}
         tracking_dir = os.path.join(data_root, 'tracking')
         for cam_id in camera_list:
@@ -835,7 +832,6 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                 pixel_point_mask_t = {}
                 image_points_t = {}
                 if load_depthmap:
-                    # TODO foreground background
                     # transform world-lidar to pixel-depth-map
                     rgb_point = np.random.random((len(lidar_points), 3))
                     gt_bboxes = []
@@ -965,7 +961,6 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                                 instance_id = instance_mask[proj_center[1], proj_center[0]]
                                 cid = semantic_mask[proj_center[1], proj_center[0]]
                                 box_mask = (instance_mask == instance_id) & (semantic_mask == cid)
-                                # TODO DYNAMIC MASK
                                 dynamic_mask[box_mask] = True
                                 box_point_mask = box_mask[image_points[:, 1].astype(np.int32), image_points[:, 0].astype(np.int32)]
                                 color = image[image_points[:, 1].astype(np.int32), image_points[:, 0].astype(np.int32)]
@@ -1022,7 +1017,6 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                         return in_mask
 
                     # ASSOCIATE TRACKING RESULT IN 3 FRAMES & INIT VEHICLE POINT CLOUD 
-                    # TODO SAVE & LOAD CACHE
                     vehicle_pcd_save_dir = os.path.join(data_root, 'vehicle_pcd')
                     os.makedirs(vehicle_pcd_save_dir, exist_ok=True)
                     pred_boxes = {}
@@ -1043,7 +1037,8 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                                     curr_cam_dict[res['track_id']] = res
                                     curr_vehicle_id_list.append((cam_id, res['track_id']))
                             tracking_t[cam_id] = curr_cam_dict
-                        POINT_THRESHOLD = 100
+
+                        OVERLAP_POINT_THRESHOLD = args.overlap_point_threshold
                         for i_cam in range(len(camera_list)):
                             image_points_i = image_points_t[i_cam]
                             pixel_point_mask_i = pixel_point_mask_t[i_cam]
@@ -1056,7 +1051,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                                     for obj2 in tracking_t[j_cam].values():
                                         obj2_lidar_point_mask = obj2['lidar_point_mask']
                                         overlap_num = sum(obj1_lidar_point_mask & obj2_lidar_point_mask)
-                                        if overlap_num > POINT_THRESHOLD:
+                                        if overlap_num > OVERLAP_POINT_THRESHOLD:
                                             is_associate = True
                                             obj2_id = obj2['track_id']
                                             obj2_mask = obj2['mask']
@@ -1083,10 +1078,9 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                         VEHICLE_SIZE = {'car': np.array([8,4,4]), 
                                         'bus': np.array([40,10,10]), 
                                         'truck': np.array([40,10,10])}
-                        # TODO INITIALIZE VEHICLE PC
+                        # INITIALIZE VEHICLE PC
                         # new_id is total id number
-
-                        MIN_POINT_THRESHOLD = 50
+                        MIN_POINT_THRESHOLD = args.vehicle_min_point_threshold
                         for vehicle_id in range(new_id):
                             lidar_point_mask = np.zeros([len(lidar_points)]).astype(bool)
                             for k, v in vehicle_id_transform_dict.items():
@@ -1118,7 +1112,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                                 pred_boxes[vehicle_id] = rel_box
                                 vehicle_init_pose_dict[vehicle_id] = box
                                 vehicle_previous_pose_dict[vehicle_id] = rel_box
-                                storePly(os.path.join(vehicle_pcd_save_dir, f'{vehicle_id}_{t}.ply'), vehicle_points_dict[vehicle_id], vehicle_colors_dict[vehicle_id] * 255)
+                                # storePly(os.path.join(vehicle_pcd_save_dir, f'{vehicle_id}_{t}.ply'), vehicle_points_dict[vehicle_id], vehicle_colors_dict[vehicle_id] * 255)
 
                             else:
                                 canonical_model = vehicle_points_dict[vehicle_id]
@@ -1126,7 +1120,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                                 init_pose = np.eye(4)
                                 init_pose[:3,:3] = prev_rot
                                 init_pose[:3, 3] = (np.median(curr_vehicle_points, 0) - np.median(canonical_model, 0)).T
-                                pose_t = icp_registration(canonical_model, curr_vehicle_points, init_pose, max_correspondence_distance=0.1)
+                                pose_t = icp_registration(canonical_model, curr_vehicle_points, init_pose, max_correspondence_distance=args.icp_corr_dist)
                                 if np.isnan(pose_t).any():
                                     pose_t = init_pose
                                 rel_box = \
@@ -1148,7 +1142,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                                 else:
                                     vehicle_points_dict[vehicle_id] = canonical_model_update[in_box_mask]
                                     vehicle_colors_dict[vehicle_id] = np.concatenate([vehicle_colors_dict[vehicle_id], curr_vehicle_colors])[in_box_mask]
-                                    storePly(os.path.join(vehicle_pcd_save_dir, f'{vehicle_id}_{t}.ply'), vehicle_points_dict[vehicle_id], vehicle_colors_dict[vehicle_id] * 255)
+                                    # storePly(os.path.join(vehicle_pcd_save_dir, f'{vehicle_id}_{t}.ply'), vehicle_points_dict[vehicle_id], vehicle_colors_dict[vehicle_id] * 255)
 
                     pred_boxes_list.append(pred_boxes)
 
@@ -1290,8 +1284,8 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                         vehicle_pcd_dict[key] = BasicPointCloud(points=vehicle_points_dict[key], colors=vehicle_colors_dict[key], 
                                             normals=np.zeros_like(vehicle_points_dict[key]))
                 else:
-                    # TODO try to know which vehicle is moving
-                    MOVING_THRESHOLD = 2
+                    # try to know which vehicle is moving
+                    MOVING_THRESHOLD = args.vehicle_moving_threshold
                     vehicle_pcd_dict = {}
                     static_vehicle_points = []
                     static_vehicle_colors = []

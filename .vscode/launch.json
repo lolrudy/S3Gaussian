@@ -24,8 +24,6 @@
                 "--max_pt_num=8_000_000",
                 // "--eval_iterations",
                 // "1100",
-                "--coarse_iterations",
-                "0",
                 // "--lambda_seman_rgb",
                 // "1",
                 // "--coarse_iterations",
@@ -33,8 +31,8 @@
                 // "--start_checkpoint",
                 // "/data3/zrd/project/S3Gaussian/work_dirs/phase1/dynamic/recon/016_seman0_vehicle_sh0/chkpnt_fine_50000.pth",
                 // "--eval_only",
-                "--load_cache",
-                "1"
+                // "--load_cache",
+                // "1"
                 // "--load_intrinsic"
                 // "--lambda_dyn_acc",
                 // "1",

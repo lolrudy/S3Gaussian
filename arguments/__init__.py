@@ -92,6 +92,11 @@ class ModelParams(ParamGroup):
 
         self.load_cache = 1
 
+        # initializations for vehicle points
+        self.vehicle_min_point_threshold = 100
+        self.overlap_point_threshold = 100
+        self.icp_corr_dist = 0.1
+        self.vehicle_moving_threshold = 2.0
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):

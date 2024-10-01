@@ -542,7 +542,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
     online_load = True
     if args.load_cache:
         cache_path = os.path.join(data_root, f"cache_{start_time}_{end_time}{'_gt_bbox' if args.load_gt_bbox else ''}.pkl")
-        if os.path.exists(cache_path) and (not args.force_reload):
+        if os.path.exists(cache_path) and not args.force_reload:
             # read from cache
             print("Reading from cache...")
             online_load = False
@@ -566,7 +566,9 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
             vehicle_pcd_dict = cache['vehicle_pcd_dict']
             static_vehicle_pcd = cache['static_vehicle_pcd']
             occ_grid = cache['occ_grid']
-            static_ids = cache['static_ids']
+            if not args.load_gt_bbox:
+                static_ids = cache['static_ids']
+                dynamic_ids = cache['dynamic_ids']
             aabb = cache['aabb']
             timestamps = cache['timestamps']
             timestamp_mapper = cache['timestamp_mapper']
@@ -1269,8 +1271,6 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                                         normals=np.zeros((sky_pts_num, 3)))
                 dynamic_pcd = BasicPointCloud(points=dynamic_points, colors=SH2RGB(dynamic_shs), normals=np.zeros((len(dynamic_points), 3))) 
 
-                points = points[static_thing_maps==THING.STATIC_OBJECT]
-                shs = shs[static_thing_maps==THING.STATIC_OBJECT]
                 if args.load_gt_bbox:
                     static_vehicle_points = points[static_thing_maps==THING.VEHICLE]
                     static_vehicle_shs = shs[static_thing_maps==THING.VEHICLE]
@@ -1281,7 +1281,11 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                     for key in vehicle_points_dict.keys():
                         vehicle_pcd_dict[key] = BasicPointCloud(points=vehicle_points_dict[key], colors=vehicle_colors_dict[key], 
                                             normals=np.zeros_like(vehicle_points_dict[key]))
+                    points = points[static_thing_maps==THING.STATIC_OBJECT]
+                    shs = shs[static_thing_maps==THING.STATIC_OBJECT]
                 else:
+                    points = points[static_thing_maps==THING.STATIC_OBJECT]
+                    shs = shs[static_thing_maps==THING.STATIC_OBJECT]
                     # try to know which vehicle is moving
                     MOVING_THRESHOLD = args.vehicle_moving_threshold
                     vehicle_pcd_dict = {}
@@ -1385,7 +1389,9 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
         cache['static_vehicle_pcd'] = static_vehicle_pcd
         cache['gt_bboxes_list'] = gt_bboxes_list
         cache['pred_boxes_list'] = pred_boxes_list
-        cache['static_ids'] = static_ids
+        if not args.load_gt_bbox:
+            cache['static_ids'] = static_ids
+            cache['dynamic_ids'] = dynamic_ids
         cache['occ_grid'] = occ_grid
         cache['aabb'] = aabb
         cache['timestamp_mapper'] = timestamp_mapper

@@ -526,7 +526,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
     else:
         end_time += 1
     # reconstruct each clip separately (no merge)
-    assert original_start_time == start_time
+    original_start_time = start_time
     camera_list = [1,0,2]
     truncated_min_range, truncated_max_range = -2, 80
     cam_frustum_range = [0.01, 80]
@@ -542,7 +542,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
     online_load = True
     if args.load_cache:
         cache_path = os.path.join(data_root, f"cache_{start_time}_{end_time}{'_gt_bbox' if args.load_gt_bbox else ''}.pkl")
-        if os.path.exists(cache_path):
+        if os.path.exists(cache_path) and (not args.force_reload):
             # read from cache
             print("Reading from cache...")
             online_load = False
@@ -873,8 +873,6 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                                 dynamic_mask[semantic_mask == obj_id] = 1
                             for obj_id in VEHICLE_ID:
                                 thing_mask[semantic_mask == obj_id] = THING.VEHICLE
-                                if not args.load_gt_bbox:
-                                    dynamic_mask[semantic_mask == obj_id] = 1
                             for obj_id in FLAT_ID:
                                 thing_mask[semantic_mask == obj_id] = THING.ROAD
                             thing_mask[semantic_mask == SEG_NAME2ID['Sky']] = THING.SKY
@@ -1028,7 +1026,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                             image_points_i = image_points_t[cam_id]
                             pixel_point_mask_i = pixel_point_mask_t[cam_id]
                             for res in tracking_results[cam_id]:
-                                if res['image_id'] == t:
+                                if res['image_id'] == t + start_time:
                                     mask_res = np.array(mask_util.decode(res['mask'])).astype(float)
                                     res['mask'] = mask_res
                                     lidar_point_mask = pixel_point_mask_i.copy()
@@ -1290,6 +1288,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                     static_vehicle_points = []
                     static_vehicle_colors = []
                     static_ids = []
+                    dynamic_ids = []
                     
                     for vehicle_id in range(new_id):
                         if vehicle_id not in vehicle_points_dict:
@@ -1299,12 +1298,31 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                             static_vehicle_points.append(vehicle_points_dict[vehicle_id])
                             static_vehicle_colors.append(vehicle_colors_dict[vehicle_id])
                             vehicle_init_pose_dict.pop(vehicle_id)
-                            static_ids.append(vehicle_id)                    
+                            static_ids.append(vehicle_id)
                         else:
                             # dynamic
                             vehicle_pcd_dict[vehicle_id] = BasicPointCloud(points=vehicle_points_dict[vehicle_id], colors=vehicle_colors_dict[vehicle_id], 
                                 normals=np.zeros_like(vehicle_points_dict[vehicle_id]))
                             storePly(os.path.join(vehicle_pcd_save_dir, f'{vehicle_id}.ply'), vehicle_points_dict[vehicle_id], vehicle_colors_dict[vehicle_id] * 255)
+                            dynamic_ids.append(vehicle_id)
+                    # modify dynamic mask by setting all static vehicle points to 0
+                    dynamic_track_obj_ids = {k:[] for k in camera_list}
+                    for vehicle_id in dynamic_ids:
+                        for k, v in vehicle_id_transform_dict.items():
+                            if v == vehicle_id:
+                                cam_idx, obj_id = k
+                                dynamic_track_obj_ids[cam_idx].append(obj_id)
+                    for t in range(end_time-start_time):
+                        for idx, cam_idx in enumerate(camera_list):
+                            img_idx = int(len(camera_list))*t + idx
+                            dynamic_mask = dynamic_mask_seman_list[img_idx]
+                            for obj_id in dynamic_track_obj_ids[cam_idx]:
+                                for res in tracking_results[cam_idx]:
+                                    if res['track_id'] == obj_id and res['image_id'] == t + start_time:
+                                        mask = res['mask']
+                                        dynamic_mask[mask.astype(bool)] = 1
+                            dynamic_mask_seman_list[img_idx] = dynamic_mask
+
                     static_vehicle_points = np.concatenate(static_vehicle_points)
                     static_vehicle_colors = np.concatenate(static_vehicle_colors)
                     static_vehicle_pcd = BasicPointCloud(points=static_vehicle_points, colors=static_vehicle_colors, 

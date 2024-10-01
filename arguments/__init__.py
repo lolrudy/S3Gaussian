@@ -91,12 +91,13 @@ class ModelParams(ParamGroup):
         self.filter_vis_point = 0
 
         self.load_cache = 1
+        self.force_reload = False
 
         # initializations for vehicle points
         self.vehicle_min_point_threshold = 100
         self.overlap_point_threshold = 100
         self.icp_corr_dist = 0.1
-        self.vehicle_moving_threshold = 2.0
+        self.vehicle_moving_threshold = 1.0
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):
@@ -190,7 +191,7 @@ class OptimizationParams(ParamGroup):
         self.lambda_flat_reg = 200
         self.lambda_seman_rgb = 0.0
         self.lambda_seman_depth = 1.0
-        self.lambda_vehicle_dx = 1
+        self.lambda_vehicle_dx = 1.0
         self.vehicle_dx_reg_iter = 5000
         self.seman_fit_bg = 0
 

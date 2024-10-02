@@ -1034,6 +1034,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                                     lidar_point_mask = pixel_point_mask_i.copy()
                                     lidar_point_mask[lidar_point_mask] = res['mask'][image_points_i[:, 1].astype(np.int32), image_points_i[:, 0].astype(np.int32)]
                                     res['lidar_point_mask'] = lidar_point_mask
+                                    res['has_enough_points'] = sum(lidar_point_mask) > args.vehicle_min_point_threshold
                                     curr_cam_dict[res['track_id']] = res
                                     curr_vehicle_id_list.append((cam_id, res['track_id']))
                             tracking_t[cam_id] = curr_cam_dict
@@ -1043,12 +1044,16 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                             image_points_i = image_points_t[i_cam]
                             pixel_point_mask_i = pixel_point_mask_t[i_cam]
                             for obj1 in tracking_t[i_cam].values():
+                                if not obj1['has_enough_points']:
+                                    continue
                                 obj1_lidar_point_mask = obj1['lidar_point_mask']
                                 obj1_id = obj1['track_id']
                                 obj1_mask = obj1['mask']
                                 is_associate = False
                                 for j_cam in range(i_cam+1, len(camera_list)):
                                     for obj2 in tracking_t[j_cam].values():
+                                        if not obj2['has_enough_points']:
+                                            continue
                                         obj2_lidar_point_mask = obj2['lidar_point_mask']
                                         overlap_num = sum(obj1_lidar_point_mask & obj2_lidar_point_mask)
                                         if overlap_num > OVERLAP_POINT_THRESHOLD:

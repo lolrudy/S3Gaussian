@@ -202,6 +202,10 @@ class OptimizationParams(ParamGroup):
         self.hard_alpha_composite = True
         self.alpha_mask_threshold = 0.8
 
+        self.warmup_iter_per_clip = 1000 # set to 0 to disable
+        self.warmup_clip_interval = 10
+        self.viewpoint_num = 3 # waymo
+
         super().__init__(parser, "Optimization Parameters")
 
 def get_combined_args(parser : ArgumentParser):

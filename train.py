@@ -231,7 +231,7 @@ def do_evaluation(
 
 def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_iterations, 
                          checkpoint_iterations, checkpoint, debug_from,
-                         gaussians: GaussianModel, scene, stage, tb_writer, train_iter,timer):
+                         gaussians: GaussianModel, scene: Scene, stage, tb_writer, train_iter,timer):
     first_iter = 0
 
     gaussians.training_setup(opt)
@@ -280,7 +280,6 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
     iter_start = torch.cuda.Event(enable_timing = True)
     iter_end = torch.cuda.Event(enable_timing = True)
 
-    viewpoint_stack = None
     ema_loss_for_log = 0.0
     ema_psnr_for_log = 0.0
     ema_acc_loss_for_log = 0.0
@@ -293,12 +292,18 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
     # video_cams = scene.getVideoCameras()
     test_cams = scene.getTestCameras()
     train_cams = scene.getTrainCameras()
-
-    if not viewpoint_stack:
-        
-        viewpoint_stack = [i for i in train_cams]
-        temp_list = copy.deepcopy(viewpoint_stack)
     
+    # incrementally add viewpoints to the stack
+    viewpoint_stack = train_cams
+    original_viewpoint_stack = copy.deepcopy(viewpoint_stack)
+    
+    # warm up
+    viewnum_per_clip = opt.warmup_clip_interval * opt.viewpoint_num
+    viewpoint_stack = train_cams[:viewnum_per_clip]
+    clip_num = (len(train_cams) - 1) // viewnum_per_clip + 1
+    warmup_iter = clip_num * opt.warmup_iter_per_clip
+
+
     batch_size = opt.batch_size
     print("data loading done")    
         
@@ -344,29 +349,13 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         idx = 0
         viewpoint_cams = []
         while idx < batch_size :    
-            
             viewpoint_cam = viewpoint_stack.pop(randint(0,len(viewpoint_stack)-1))
             if not viewpoint_stack :
-                viewpoint_stack =  temp_list.copy()
-                # print("find the worst viewpoint")
-                # 对 PSNR 字典按值进行排序，找出最低的 PSNR 值对应的 UID, 最后一个psnr 没办法得到，所以实际上比较 n*3 -1 个psnr
-                # with torch.no_grad():
-                #     if 'fine' in stage:
-                #         psnr_dict = sorted(psnr_dict.items(), key=lambda x: x[1])
-
-                #         # 将最低 PSNR 值对应的 UID 添加到列表中，直到列表的长度达到 args.end_time / 5
-                #         lowest_psnr_uids = []
-                #         for uid, _ in psnr_dict[:(args.end_time+1)]:
-                #             lowest_psnr_uids.append(uid)
-                            
-                #         psnr_dict = {}
-
-                #         # 将 lowest_psnr_uids 中 UID 对应的 Camera 对象加到 viewpoint_stack 的末尾
-                #         for uid in lowest_psnr_uids:
-                #             for cam in viewpoint_stack:
-                #                 if cam.uid == int(uid):
-                #                     viewpoint_stack.append(cam)
-                #                     break                
+                if iteration < warmup_iter:
+                    curr_clip_num = iteration // opt.warmup_iter_per_clip
+                    viewpoint_stack =  original_viewpoint_stack.copy()[curr_clip_num*viewnum_per_clip:(curr_clip_num+1)*viewnum_per_clip]       
+                else:
+                    viewpoint_stack =  original_viewpoint_stack.copy()            
                 
             viewpoint_cams.append(viewpoint_cam)
             idx +=1
@@ -673,7 +662,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                     densify_threshold = opt.densify_grad_threshold_fine_init - iteration*(opt.densify_grad_threshold_fine_init - opt.densify_grad_threshold_after)/(opt.densify_until_iter )  
 
                 # remove invisible point
-                if iteration == opt.remove_interval and 'coarse' in stage:
+                if iteration == opt.remove_interval and 'coarse' in stage and iteration > warmup_iter:
                     remove_point = True
                     remove_mask = (gaussians.max_radii2D == 0) & (~gaussians._deformation_table)
                     gaussians.prune_points(remove_mask)

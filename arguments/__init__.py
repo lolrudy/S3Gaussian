@@ -162,7 +162,7 @@ class OptimizationParams(ParamGroup):
         self.max_pt_num = 4_000_000
         self.prune_from_iter = 500
         self.prune_interval = 100
-        self.prune_dynamic_iteration = 0
+        self.prune_dynamic_iteration = 5000
         
         self.scale_ratio = 1.0 #   global-scale = local-norm-scale * voxel_size * scale_ratio
         # feat

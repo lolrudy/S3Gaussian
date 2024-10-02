@@ -566,9 +566,9 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
             vehicle_pcd_dict = cache['vehicle_pcd_dict']
             static_vehicle_pcd = cache['static_vehicle_pcd']
             occ_grid = cache['occ_grid']
-            if not args.load_gt_bbox:
-                static_ids = cache['static_ids']
-                dynamic_ids = cache['dynamic_ids']
+            # if not args.load_gt_bbox:
+            #     static_ids = cache['static_ids']
+            #     dynamic_ids = cache['dynamic_ids']
             aabb = cache['aabb']
             timestamps = cache['timestamps']
             timestamp_mapper = cache['timestamp_mapper']

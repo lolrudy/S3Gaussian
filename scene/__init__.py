@@ -101,7 +101,7 @@ class Scene:
             random.shuffle(scene_info.train_cameras)  # Multi-res consistent random shuffling
             random.shuffle(scene_info.test_cameras)  # Multi-res consistent random shuffling
 
-        self.cameras_extent = scene_info.nerf_normalization["radius"]
+        self.cameras_extent = max(scene_info.nerf_normalization["radius"], 10)
 
         for resolution_scale in resolution_scales:
             print("Loading Training Cameras")

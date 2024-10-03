@@ -663,6 +663,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
 
                 # remove invisible point
                 if iteration == opt.remove_interval and 'coarse' in stage and iteration > warmup_iter:
+                    print("remove invisible point")
                     remove_point = True
                     remove_mask = (gaussians.max_radii2D == 0) & (~gaussians._deformation_table)
                     gaussians.prune_points(remove_mask)
@@ -676,7 +677,8 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                 
                 if  (~remove_point) and iteration > opt.pruning_from_iter and iteration % opt.pruning_interval == 0 :
                     # TODO SAVE DYNAMIC POINT BEFORE RUNING
-                    size_threshold = 20 if iteration > opt.opacity_reset_interval else None
+                    # size_threshold = 20 if iteration > opt.opacity_reset_interval else None
+                    size_threshold = None
                     # opacity_threshold = 0.011 if iteration % opt.opacity_reset_interval == 0 else opacity_threshold
                     gaussians.prune(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold, 
                                     prune_dynamic='fine' in stage and iteration > opt.prune_dynamic_iteration)
@@ -686,13 +688,9 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                 # if iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0]<360000 and opt.add_point:
                 #     gaussians.grow(5,5,scene.model_path,iteration,stage)
                     # torch.cuda.empty_cache()
-                if iteration % opt.opacity_reset_interval == 0:
+                if iteration % opt.opacity_reset_interval == 0 and opt.reset_opacity:
                     print("reset opacity")
                     gaussians.reset_opacity()
-            # else:
-            #     if  iteration > opt.pruning_from_iter and iteration % opt.pruning_interval == 0 :
-            #         size_threshold = 20 if iteration > opt.opacity_reset_interval else None
-            #         gaussians.prune(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold, prune_dynamic='fine' in stage)
             
 
 def training(dataset, hyper, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, expname):

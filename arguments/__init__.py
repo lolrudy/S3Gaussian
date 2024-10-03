@@ -144,6 +144,7 @@ class OptimizationParams(ParamGroup):
         self.depth_loss_type = "l2"
         self.densification_interval = 100   # 100
         self.opacity_reset_interval = 3000
+        self.reset_opacity = 1
         self.pruning_interval = 100
         self.pruning_from_iter = 500
         self.densify_until_iter = 10_000
@@ -263,6 +264,7 @@ class ModelHiddenParams(ParamGroup):
         self.static_mlp=False
         self.apply_rotation=False
         self.sh_degree = 0
+        self.prune_3d = 1
 
         
         super().__init__(parser, "ModelHiddenParams")

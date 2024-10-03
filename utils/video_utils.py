@@ -248,7 +248,7 @@ def render_func(
                         channel_axis=0,
                     )
                 )
-                lpipss.append(torch.tensor(lpips(rgb, gt_rgb,net_type='alex')).mean().item())
+                lpipss.append(lpips(rgb, gt_rgb, net_type='alex').mean().item())
                 
                 dynamic_mask = get_numpy(viewpoint_cam.dynamic_mask).astype(bool)
                 if dynamic_mask.sum() > 0:

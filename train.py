@@ -688,7 +688,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                 # if iteration % opt.densification_interval == 0 and gaussians.get_xyz.shape[0]<360000 and opt.add_point:
                 #     gaussians.grow(5,5,scene.model_path,iteration,stage)
                     # torch.cuda.empty_cache()
-                if iteration % opt.opacity_reset_interval == 0 and opt.reset_opacity:
+                if iteration % opt.opacity_reset_interval == 0 and opt.reset_opacity and iteration > warmup_iter:
                     print("reset opacity")
                     gaussians.reset_opacity()
             

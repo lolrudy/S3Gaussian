@@ -918,7 +918,6 @@ class GaussianModel:
         return rot_reg_loss + scale_reg_loss
 
 
-# 同样 merge optimizer
 def merge_models(old_model:GaussianModel, new_model:GaussianModel,hyper,merged_model=None):
     # 创建一个新的模型实例，这里我们假设max_sh_degree和hyper可以从任一模型获取
 
@@ -957,12 +956,6 @@ def merge_models(old_model:GaussianModel, new_model:GaussianModel,hyper,merged_m
 
         elif attr == 'optimizer':
             continue
-            # merged_optmizer = old_model.merge_optimizer(new_model.optimizer)
-            # setattr(merged_model, attr, merged_optmizer)
-            # del attr_value_dynamic
-            # del attr_value_static
-            # gc.collect()
-            # torch.cuda.empty_cache() 
 
         else:
             # 非tensor属性，假设静态和动态模型中是相同的

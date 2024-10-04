@@ -38,6 +38,7 @@ from utils.video_utils import render_pixels, save_videos
 from utils.visualization_tools import compute_optical_flow_and_save
 from scene.gaussian_model import merge_models
 from utils.refs import THING
+import pandas as pd
 
 to8b = lambda x : (255*np.clip(x.cpu().numpy(),0,1)).astype(np.uint8)
 
@@ -107,7 +108,7 @@ def do_evaluation(
                 "masked_ssim",
                 # "masked_feat_psnr",
             ]:
-                eval_dict[f"pixel_metrics/test/{k}"] = v
+                eval_dict[f"test/{k}"] = v
                 
         os.makedirs(f"{eval_dir}/metrics", exist_ok=True)
         os.makedirs(f"{eval_dir}/test_videos", exist_ok=True)
@@ -116,6 +117,7 @@ def do_evaluation(
         with open(test_metrics_file, "w") as f:
             json.dump(eval_dict, f)
         print(f"Image evaluation metrics saved to {test_metrics_file}")
+        pd.DataFrame([eval_dict]).to_csv(f"{eval_dir}/metrics/{stage}_{step}_images_test_{current_time}.csv",index=False)
 
         video_output_pth = f"{eval_dir}/test_videos/{stage}_{step}.mp4"
 
@@ -154,7 +156,7 @@ def do_evaluation(
                 "masked_ssim",
                 # "masked_feat_psnr",
             ]:
-                eval_dict[f"pixel_metrics/train/{k}"] = v
+                eval_dict[f"train/{k}"] = v
                 
         os.makedirs(f"{eval_dir}/metrics", exist_ok=True)
         os.makedirs(f"{eval_dir}/train_videos", exist_ok=True)
@@ -163,6 +165,7 @@ def do_evaluation(
         with open(train_metrics_file, "w") as f:
             json.dump(eval_dict, f)
         print(f"Image evaluation metrics saved to {train_metrics_file}")
+        pd.DataFrame([eval_dict]).to_csv(f"{eval_dir}/metrics/{stage}_{step}_images_train_{current_time}.csv")
 
         video_output_pth = f"{eval_dir}/train_videos/{stage}_{step}.mp4"
 
@@ -203,7 +206,7 @@ def do_evaluation(
                 "masked_ssim",
                 # "masked_feat_psnr",
             ]:
-                eval_dict[f"pixel_metrics/full/{k}"] = v
+                eval_dict[f"full/{k}"] = v
                 
         os.makedirs(f"{eval_dir}/metrics", exist_ok=True)
         os.makedirs(f"{eval_dir}/full_videos", exist_ok=True)
@@ -891,12 +894,8 @@ if __name__ == "__main__":
     parser.add_argument("--prior_checkpoint", type=str, default = None)
     parser.add_argument("--merge", action="store_true", help="merge gaussians")
     parser.add_argument("--prior_checkpoint2", type=str, default = None)
-    parser.add_argument('--no-feat-head', action='store_true', default=False)
     
     args = parser.parse_args(sys.argv[1:])
-    if args.no_feat_head:
-        args.feat_head = False
-        args.load_feat_map = False
     
     args.save_iterations.append(args.iterations)
     if args.configs:

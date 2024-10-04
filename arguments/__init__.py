@@ -264,7 +264,7 @@ class ModelHiddenParams(ParamGroup):
         self.static_mlp=False
         self.apply_rotation=False
         self.sh_degree = 0
-        self.prune_3d = 1
+        self.prune_3d = 0
 
         
         super().__init__(parser, "ModelHiddenParams")

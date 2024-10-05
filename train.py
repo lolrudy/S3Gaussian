@@ -129,7 +129,7 @@ def do_evaluation(
             num_cams=3,
             save_seperate_video=True,
             fps=24,
-            verbose=True,
+            # verbose=True,
         )
 
         del render_results, vis_frame_dict
@@ -177,7 +177,7 @@ def do_evaluation(
             num_cams=3,
             save_seperate_video=True,
             fps=24,
-            verbose=True,
+            # verbose=True,
         )
 
         del render_results
@@ -226,7 +226,7 @@ def do_evaluation(
             num_cams=3,
             save_seperate_video=True,
             fps=24,
-            verbose=True,
+            # verbose=True,
         )
         
         del render_results, vis_frame_dict
@@ -234,7 +234,7 @@ def do_evaluation(
 
 def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_iterations, 
                          checkpoint_iterations, checkpoint, debug_from,
-                         gaussians: GaussianModel, scene: Scene, stage, tb_writer, train_iter,timer):
+                         gaussians: GaussianModel, scene: Scene, stage, tb_writer, train_iter, timer, clip_id=0):
     first_iter = 0
 
     gaussians.training_setup(opt)
@@ -252,6 +252,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 
     if args.eval_only:
+        assert clip_id == 0
         torch.save(gaussians._deformation.state_dict(),os.path.join(args.model_path, "deformation.pth"))
 
         eval_dir = os.path.join(args.model_path,"eval")
@@ -295,7 +296,10 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
     # video_cams = scene.getVideoCameras()
     test_cams = scene.getTestCameras()
     train_cams = scene.getTrainCameras()
-    
+    if clip_id is not None:
+        test_cams = [c for c in test_cams if c.clip_id == clip_id]
+        train_cams = [c for c in train_cams if c.clip_id == clip_id]
+
     # incrementally add viewpoints to the stack
     viewpoint_stack = train_cams
     original_viewpoint_stack = copy.deepcopy(viewpoint_stack)
@@ -611,11 +615,16 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                     # total_images.append(to8b(temp_image).transpose(1,2,0))
                     
             if (iteration % opt.eval_iterations == 0):
-                eval_dir = os.path.join(args.model_path,"eval")
+                clip_name = f"clip_{clip_id}" if clip_id is not None else "full"
+                eval_dir = os.path.join(args.model_path, clip_name, "eval")
                 os.makedirs(eval_dir,exist_ok=True)
                 viewpoint_stack_full = scene.getFullCameras().copy()
                 viewpoint_stack_test = scene.getTestCameras().copy()
                 viewpoint_stack_train = scene.getTrainCameras().copy()
+                if clip_id is not None:
+                    viewpoint_stack_full = [c for c in viewpoint_stack_full if c.clip_id == clip_id]
+                    viewpoint_stack_test = [c for c in viewpoint_stack_test if c.clip_id == clip_id]
+                    viewpoint_stack_train = [c for c in viewpoint_stack_train if c.clip_id == clip_id]
 
                 do_evaluation(
                     viewpoint_stack_full,
@@ -639,12 +648,18 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
 
             if (iteration in checkpoint_iterations):
                 save_path = "chkpnt" +f"_{stage}_" + str(30000) + ".pth"
-                for file in os.listdir(scene.model_path):
+                if clip_id is not None:
+                    clip_name = f"clip_{clip_id}"
+                else:
+                    clip_name = "full"
+                ckpt_dir = os.path.join(args.model_path, clip_name)
+                os.makedirs(ckpt_dir,exist_ok=True)
+                for file in os.listdir(ckpt_dir):
                     if file.endswith(".pth") and file != save_path:
-                        os.remove(os.path.join(scene.model_path, file))
+                        os.remove(os.path.join(ckpt_dir, file))
 
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
-                torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" +f"_{stage}_" + str(iteration) + ".pth")
+                torch.save((gaussians.capture(), iteration), ckpt_dir + "/chkpnt" +f"_{stage}_" + str(iteration) + ".pth")
             
             timer.start()
             
@@ -704,7 +719,7 @@ def training(dataset, hyper, opt, pipe, testing_iterations, saving_iterations, c
         
     dataset.model_path = args.model_path
     timer = Timer()
-    scene = Scene(dataset, gaussians, load_coarse=None)
+    scene = Scene(dataset, gaussians)
     timer.start()
     
     # eval
@@ -717,61 +732,23 @@ def training(dataset, hyper, opt, pipe, testing_iterations, saving_iterations, c
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
     
-    # if args.merge and args.prior_checkpoint and args.prior_checkpoint2:
-    #     # 这个是最新的，deformation的网络要用这个
-    #     gaussians_new = GaussianModel(dataset.sh_degree, hyper)
-    #     (model_params, first_iter) = torch.load(args.prior_checkpoint2)
-    #     gaussians_new.restore(model_params, opt)
-    #     deformation_net = gaussians_new._deformation
-    #     del gaussians_new
-    #     gc.collect()
-    #     torch.cuda.empty_cache()
-        
-    #     # 这个是上一个
-    #     gaussians_prev = GaussianModel(dataset.sh_degree, hyper)
-    #     (model_params, first_iter) = torch.load(args.prior_checkpoint)
-    #     gaussians_prev.restore(model_params, opt)
-               
-    #     gaussians_prev._deformation = deformation_net.to('cuda')
+    clip_id_list = [c.clip_id for c in viewpoint_stack_train]
+    clip_num = max(clip_id_list) + 1
+    for clip_id in range(clip_num):
+        print('training clip id:', clip_id)
+        scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_iterations,
+                                checkpoint_iterations, checkpoint, debug_from,
+                                gaussians, scene, "coarse", tb_writer, opt.coarse_iterations,timer,clip_id=clip_id)
 
-        
-    #     do_evaluation(
-    #         viewpoint_stack_full,
-    #         viewpoint_stack_test,
-    #         gaussians_prev,
-    #         background,
-    #         pipe,
-    #         eval_dir,
-    #         render_full=True,
-    #         step=99999,
-    #         args=args
-    #     )
-        
-        # merge
-        # gaussians = merge_models(gaussians_new, gaussians_prev, hyper, gaussians)
-           
-    scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_iterations,
-                             checkpoint_iterations, checkpoint, debug_from,
-                             gaussians, scene, "coarse", tb_writer, opt.coarse_iterations,timer)
 
-    if args.prior_checkpoint:
-        assert 'fine' in args.prior_checkpoint
-
-        gaussians_prev = GaussianModel(hyper)
-        
-        (model_params, first_iter) = torch.load(args.prior_checkpoint)
-        gaussians_prev.restore(model_params, opt)
-            
-        deformation_net = gaussians_prev._deformation
-        del gaussians_prev
-        gc.collect()
-        torch.cuda.empty_cache()
-        
-        gaussians._deformation = deformation_net.to('cuda')
-    
-    scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_iterations,
-                         checkpoint_iterations, checkpoint, debug_from,
-                         gaussians, scene, "fine", tb_writer, opt.iterations,timer)
+        scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_iterations,
+                            checkpoint_iterations, checkpoint, debug_from,
+                            gaussians, scene, "fine", tb_writer, opt.iterations,timer,clip_id=clip_id)
+    if clip_num > 1:
+        print('training all clips')
+        scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_iterations,
+                            checkpoint_iterations, checkpoint, debug_from,
+                            gaussians, scene, "fine", tb_writer, opt.iterations,timer,clip_id=None)
     
     do_evaluation(
         viewpoint_stack_full,

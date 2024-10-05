@@ -67,6 +67,7 @@ class CameraInfo(NamedTuple):
     dynamic_mask_seman: np.array = None
     vehicle_points: np.array = None
     vehicle_colors: np.array = None
+    clip_id: int = None
 
 class SceneInfo(NamedTuple):
     point_cloud: BasicPointCloud
@@ -498,6 +499,7 @@ def constructCameras_waymo(frames_list, white_background, mapper = {},
                         dynamic_mask_seman=dynamic_mask_seman,
                         vehicle_points = frame["vehicle_points"],
                         vehicle_colors = frame["vehicle_colors"],
+                        clip_id = frame['clip_id']
                          ))
             
     return cam_infos
@@ -537,7 +539,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
     load_dynamic_mask = load_dynamic_mask
     load_feat_map = load_feat_map
     load_lidar, load_depthmap = True, True
-
+    load_clip = args.clip_length > 0
 
     online_load = True
     if args.load_cache:
@@ -1429,6 +1431,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                             dynamic_mask = dynamic_mask_seman_list[train_idx[idx]] if len(dynamic_mask_seman_list)>0 else None,
                             vehicle_points = vehicle_points_list[train_idx[idx]] if len(vehicle_points_list)>0 else None,
                             vehicle_colors=vehicle_colors_list[train_idx[idx]] if len(vehicle_colors_list)>0 else None,
+                            clip_id = (t+start_time-original_start_time) // args.clip_length if load_clip else 0,
         )
         train_frames_list.append(frame_dict)
     for idx, t in enumerate(test_timestamps):
@@ -1448,6 +1451,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                             dynamic_mask = dynamic_mask_seman_list[test_idx[idx]] if len(dynamic_mask_seman_list)>0 else None,
                             vehicle_points = vehicle_points_list[test_idx[idx]] if len(vehicle_points_list)>0 else None,
                             vehicle_colors=vehicle_colors_list[test_idx[idx]] if len(vehicle_colors_list)>0 else None,
+                            clip_id = (t+start_time-original_start_time) // args.clip_length if load_clip else 0,
         )
         test_frames_list.append(frame_dict)
     if len(test_timestamps)==0:
@@ -1470,6 +1474,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                                 dynamic_mask = dynamic_mask_seman_list[full_idx[idx]] if len(dynamic_mask_seman_list)>0 else None,
                                 vehicle_points = vehicle_points_list[full_idx[idx]] if len(vehicle_points_list)>0 else None,
                                 vehicle_colors=vehicle_colors_list[full_idx[idx]] if len(vehicle_colors_list)>0 else None,
+                                clip_id = (t+start_time-original_start_time) // args.clip_length if load_clip else 0,
             )
             full_frames_list.append(frame_dict)
     

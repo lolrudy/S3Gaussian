@@ -98,6 +98,8 @@ class ModelParams(ParamGroup):
         self.overlap_point_threshold = 100
         self.icp_corr_dist = 0.1
         self.vehicle_moving_threshold = 1.0
+
+        self.clip_length = -1
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):

@@ -24,21 +24,13 @@ class Scene:
 
     gaussians : GaussianModel
 
-    def __init__(self, args : ModelParams, gaussians : GaussianModel, load_iteration=None, shuffle=False, resolution_scales=[1.0],
-                 load_coarse=False,
-                 #for waymo
-                 bg_gaussians: GaussianModel=None, 
-                 build_octree=False, replace_pcd_by_octree_center=False,
-                 build_grid=False, build_featgrid=False,
-                 ):
+    def __init__(self, args : ModelParams, gaussians : GaussianModel, load_iteration=None, shuffle=False, resolution_scales=[1.0]):
         """b
         :param path: Path to colmap scene main folder.
         """
         self.model_path = args.model_path
         self.loaded_iter = None
         self.gaussians = gaussians
-        # for waymo
-        self.bg_gaussians = bg_gaussians
 
         if load_iteration:
             if load_iteration == -1:
@@ -60,7 +52,7 @@ class Scene:
         elif os.path.exists(os.path.join(args.source_path,"frame_info.json")):
             print("Found frame_info.json file, assuming Waymo data set!")
             scene_info = sceneLoadTypeCallbacks["Waymo"](args.source_path, args.white_background, args.eval,
-                                    use_bg_gs = bg_gaussians is not None,
+                                    use_bg_gs = False,
                                     load_sky_mask = args.load_sky_mask, #False, 
                                     load_panoptic_mask = args.load_panoptic_mask, #True, 
                                     load_intrinsic = args.load_intrinsic, #False,
@@ -112,25 +104,13 @@ class Scene:
             self.full_cameras[resolution_scale] = cameraList_from_camInfos(scene_info.full_cameras, resolution_scale, args)
 
         if self.loaded_iter:
-            self.gaussians.load_ply(os.path.join(self.model_path,
-                                                           "point_cloud",
-                                                           "iteration_" + str(self.loaded_iter),
-                                                           "point_cloud.ply"))
-            if bg_gaussians is not None:
-                self.bg_gaussians.load_ply(os.path.join(self.model_path,
-                                                              "point_cloud",
-                                                              "iteration_" + str(self.loaded_iter),
-                                                              "bg_point_cloud.ply"))
+            raise NotImplementedError("Loading of trained models in Scene class not implemented yet!")
         else:
             self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent, dynamic_pcd=scene_info.dynamic_point_cloud,
                                            road_pcd=scene_info.road_pcd, sky_pcd=scene_info.sky_pcd, 
                                            static_vehicle_pcd=scene_info.static_vehicle_pcd,
                                            vehicle_pcd_dict=scene_info.vehicle_pcd_dict,
                                            vehicle_init_pose_dict=scene_info.vehicle_init_pose_dict)
-                                        #    vehicle_pcd=scene_info.vehicle_pcd)
-            # for waymo
-            if bg_gaussians is not None:
-                self.bg_gaussians.create_from_pcd(scene_info.bg_point_cloud, self.cameras_extent)
 
         self.gaussians.aabb = scene_info.cam_frustum_aabb
         self.gaussians.aabb_tensor = torch.tensor(scene_info.cam_frustum_aabb, dtype=torch.float32).cuda()
@@ -142,43 +122,11 @@ class Scene:
         else:
             self.gaussians.occ_grid = scene_info.occ_grid
         self.gaussians.occ_voxel_size = args.occ_voxel_size
-        # check occ
-        #import numpy as np
-        #voxel_coords = np.floor((self.gaussians._xyz.cpu().detach().numpy() - scene_info.cam_frustum_aabb[0]) / args.occ_voxel_size).astype(int)
-        #occ = scene_info.occ_grid[voxel_coords[:, 0], voxel_coords[:, 1], voxel_coords[:, 2]]
-        #occ_mask = self.gaussians.get_gs_mask_in_occGrid()
-        #assert all(occ == occ_mask), 'occ should be equal to occ_mask'
-        if args.load_panoptic_mask:
-            self.gaussians.num_panoptic_objects = scene_info.num_panoptic_objects
-            self.gaussians.panoptic_object_ids = scene_info.panoptic_object_ids
-            self.gaussians.panoptic_id_to_idx = scene_info.panoptic_id_to_idx
         # for deformation-field
         if hasattr(self.gaussians, '_deformation'):
             self.gaussians._deformation.deformation_net.set_aabb(scene_info.cam_frustum_aabb[1],
                                                 scene_info.cam_frustum_aabb[0])
-        ## make one-hot gt label
-        #gt_label = F.one_hot(torch.arange(self.gaussians.num_panoptic_objects)).float().cuda()
-        ## set as nn.Embedding
-        #self.gaussians.gt_label = torch.nn.Embedding.from_pretrained(gt_label, freeze=True)
-        if build_octree:
-            # forward : point cloud -> octree
-            self.gaussians.build_octree(aabb= scene_info.cam_frustum_aabb, # use camera-extent aabb
-                                        resolution=5, threshold=10)
-            if replace_pcd_by_octree_center:
-                self.gaussians.replace_pcd_by_octree_node()
-            # to cuda 
-            self.gaussians.octree.to_cuda()
-            # backward : octree -> point cloud : get point - octree.node correspondence
-            self.node_list, self.rot_list, self.scale_list = self.gaussians.octree.get_point_node_list()
-            # check if all nodes are leaf nodes
-            assert all([node.is_leaf() for node in self.node_list]), 'all nodes should be leaf nodes'
-        if build_grid:
-            # 建立 dense-occ-grid 来表达高斯的分布, 优势在于 索引快速
-            self.gaussians.build_grid(aabb= scene_info.cam_frustum_aabb, # use camera-extent aabb
-                                    res=[128, 128, 128])
-        if build_featgrid:
-            self.gaussians.build_featgrid(aabb= scene_info.cam_frustum_aabb, # use camera-extent aabb
-                                res=[128, 128, 128])
+
 
     def save(self, iteration, stage):
         if stage == "coarse":
@@ -186,29 +134,13 @@ class Scene:
 
         else:
             point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))
-            
-            # if save_spilt:
-            #     pc_dynamic_path = os.path.join(point_cloud_path,"point_cloud_dynamic.ply")
-            #     pc_static_path = os.path.join(point_cloud_path,"point_cloud_static.ply")
         self.gaussians.save_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
         self.gaussians.save_deformation(point_cloud_path)
 
-    # def save(self, iteration):
-    #     point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))
-    #     self.gaussians.save_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
-    #     # background
-    #     # if self.gaussians.bg_gaussians is not None:
-    #     #     self.gaussians.bg_gs.save_ply(os.path.join(point_cloud_path, "bg_point_cloud.ply"))
-
-    #     if self.bg_gaussians is not None:
-    #         self.bg_gaussians.save_ply(os.path.join(point_cloud_path, "bg_point_cloud.ply"))
 
     def save_gridgs(self, iteration):
         point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}_grid".format(iteration))
         self.gaussians.save_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
-        # background
-        if self.bg_gaussians is not None:
-            self.bg_gaussians.save_ply(os.path.join(point_cloud_path, "bg_point_cloud.ply"))
 
 
     def getTrainCameras(self, scale=1.0):

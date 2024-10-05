@@ -120,7 +120,8 @@ def loadCam(args, id, cam_info, resolution_scale):
                   gt_bboxes=gt_bboxes,
                   dynamic_mask_seman=dynamic_mask_seman,
                   vehicle_points=vehicle_points,
-                  vehicle_colors=vehicle_colors
+                  vehicle_colors=vehicle_colors,
+                  clip_id=cam_info.clip_id,
                   )
 
 def cameraList_from_camInfos(cam_infos, resolution_scale, args):

@@ -400,7 +400,7 @@ def save_videos(
     save_seperate_video: bool = False,
     save_images: bool = False,
     fps: int = 10,
-    verbose: bool = True,
+    verbose: bool = False,
 ):
     if save_seperate_video:
         return_frame = save_seperate_videos(

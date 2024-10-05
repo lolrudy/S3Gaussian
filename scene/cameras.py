@@ -21,7 +21,7 @@ class Camera(nn.Module):
                  sky_mask = None, depth_map = None, semantic_mask = None, instance_mask = None,
                  num_panoptic_objects = 0,
                  sam_mask = None, dynamic_mask = None, feat_map = None, objects = None, intrinsic = None, c2w = None, 
-                 time = None, gt_bboxes=None, dynamic_mask_seman=None, vehicle_points=None, vehicle_colors=None
+                 time = None, gt_bboxes=None, dynamic_mask_seman=None, vehicle_points=None, vehicle_colors=None, clip_id=None
                  ):
         super(Camera, self).__init__()
 
@@ -79,6 +79,7 @@ class Camera(nn.Module):
         self.dynamic_mask_seman = dynamic_mask_seman
         self.vehicle_points = vehicle_points
         self.vehicle_colors = vehicle_colors
+        self.clip_id = clip_id
 
 class MiniCam:
     def __init__(self, width, height, fovy, fovx, znear, zfar, world_view_transform, full_proj_transform):

@@ -4,6 +4,7 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+
         {
             "name": "train-016-debug",
             "type": "debugpy",
@@ -17,7 +18,7 @@
                 "--expname",
                 "waymo",
                 "--model_path",
-                "work_dirs/dynamic/nvs/016_clip_full",
+                "work_dirs/dynamic/nvs/016_2clip",
                 "--stride=10",
                 "--clip_length=50",
                 // "--reset_opacity=0",
@@ -29,8 +30,8 @@
                 "--end_time=-1",
                 // "--prune_3d=0",
                 // "--prune_dynamic_iteration=5000",
-                "--num_pts=8_000_000",
-                "--max_pt_num=16_000_000",
+                "--num_pts=4_000_000",
+                "--max_pt_num=8_000_000",
                 // "--eval_iterations=1",
                 // "1100",
                 // "--lambda_seman_rgb",

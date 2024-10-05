@@ -562,6 +562,17 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
             gt_bboxes_list = cache['gt_bboxes_list']
             pred_boxes_list = cache['pred_boxes_list']
             pcd = cache['pcd']
+            points = pcd.points
+            colors = pcd.colors
+            normals = pcd.normals
+            if len(points)>num_pts:
+                print(f'downsampling point cloud {len(points)}')
+                downsampled_indices = np.random.choice(
+                    len(points), num_pts, replace=False
+                )
+                points = points[downsampled_indices]
+                colors = colors[downsampled_indices]
+                pcd = BasicPointCloud(points=points, colors=colors, normals=normals[downsampled_indices])
             bg_pcd = cache['bg_pcd']
             road_pcd = cache['road_pcd']
             sky_pcd = cache['sky_pcd']

@@ -97,6 +97,7 @@ class ModelParams(ParamGroup):
         self.vehicle_min_point_threshold = 100
         self.overlap_point_threshold = 100
         self.icp_corr_dist = 0.1
+        self.icp_fitness = 0.3
         self.vehicle_moving_threshold = 1.0
 
         self.clip_length = -1
@@ -208,6 +209,7 @@ class OptimizationParams(ParamGroup):
         self.warmup_iter_per_clip = 1000 # set to 0 to disable
         self.warmup_clip_interval = 10
         self.viewpoint_num = 3 # waymo
+        self.prune_size_threshold = -1
 
         super().__init__(parser, "Optimization Parameters")
 
@@ -267,6 +269,8 @@ class ModelHiddenParams(ParamGroup):
         self.apply_rotation=False
         self.sh_degree = 0
         self.prune_3d = 0
+        self.detach_x_for_dx = 0
+        self.reset_visible = 0
 
         
         super().__init__(parser, "ModelHiddenParams")

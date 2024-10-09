@@ -1,0 +1,4 @@
+# CUDA_VISIBLE_DEVICES=2 python train.py -s ../waymo_016 --model_path work_dirs/dynamic/nvs/016_prunes100n_clip1 --detach_x_for_dx 1 --prune_size_threshold 100 --start_time 0 --end_time 49 --stride 10
+CUDA_VISIBLE_DEVICES=2 python train.py -s ../waymo_016 --model_path work_dirs/dynamic/nvs/016_prunes100n_clip2 --detach_x_for_dx 1 --prune_size_threshold 100 --start_time 50 --end_time 99 --stride 10
+CUDA_VISIBLE_DEVICES=2 python train.py -s ../waymo_016 --model_path work_dirs/dynamic/nvs/016_prunes100n_clip3 --detach_x_for_dx 1 --prune_size_threshold 100 --start_time 100 --end_time 149 --stride 10
+CUDA_VISIBLE_DEVICES=2 python train.py -s ../waymo_016 --model_path work_dirs/dynamic/nvs/016_prunes100n_clip4 --detach_x_for_dx 1 --prune_size_threshold 100 --start_time 150 --end_time -1 --stride 10

@@ -54,6 +54,7 @@ class GaussianModel:
         self.active_sh_degree = 0
         self.max_sh_degree = args.sh_degree  
         self.prune_3d = args.prune_3d
+        self.reset_visible = args.reset_visible
         self._xyz = torch.empty(0)
         # self._deformation =  torch.empty(0)
         self._deformation = deform_network(args)
@@ -484,7 +485,13 @@ class GaussianModel:
         PlyData([static_el]).write(static_pcd_path)
                     
     def reset_opacity(self):
-        opacities_new = inverse_sigmoid(torch.min(self.get_opacity, torch.ones_like(self.get_opacity) * 0.01))
+        # ONLY RESET OPACITY FOR VISIBLE POINTS, NOT WORKING SINCE MAXRADII2D IS SET TO 0 IN DENSIFICATION
+        if self.reset_visible:
+            visible_point_mask = self.max_radii2D > 1e-3
+        else:
+            visible_point_mask = torch.ones_like(self.max_radii2D).bool()
+        opacities_new = self._opacity.clone()
+        opacities_new[visible_point_mask] = inverse_sigmoid(torch.min(self.get_opacity, torch.ones_like(self.get_opacity) * 0.01))[visible_point_mask]
         optimizable_tensors = self.replace_tensor_to_optimizer(opacities_new, "opacity")
         self._opacity = optimizable_tensors["opacity"]
 
@@ -632,7 +639,8 @@ class GaussianModel:
         self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self._deformation_accum = torch.zeros((self.get_xyz.shape[0], 3), device="cuda")
         self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
-        self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
+        if self.max_radii2D.shape[0] < self.get_xyz.shape[0]:
+            self.max_radii2D = torch.cat([self.max_radii2D, torch.zeros((self.get_xyz.shape[0]-self.max_radii2D.shape[0]), device="cuda")])
 
     def densify_and_split(self, grads, grad_threshold, scene_extent, N=2):
         n_init_points = self.get_xyz.shape[0]

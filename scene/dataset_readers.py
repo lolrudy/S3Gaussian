@@ -840,7 +840,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                     rgb_point = np.random.random((len(lidar_points), 3))
                     gt_bboxes = []
                     if args.load_gt_bbox:
-                        gt_bbox_path = os.path.join(data_root, "gt_bbox", f"{t:03d}.json")
+                        gt_bbox_path = os.path.join(data_root, "gt_bbox", f"{t+start_time:03d}.json")
                         with open(gt_bbox_path, 'r') as file:
                             gt_bbox_origin = json.load(file)
                         for box in gt_bbox_origin:
@@ -858,10 +858,10 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                             # dynamic_mask = Image.open(os.path.join(data_root, "dynamic_masks", f"{t:03d}_{cam_idx}.png"))
                             # dynamic_mask = dynamic_mask.resize(load_size[::-1], Image.NEAREST)
                             # dynamic_mask = np.array(dynamic_mask) / 255
-                            semantic_mask_pil = Image.open(os.path.join(data_root, "panoptic", "semantic_mask", f"{t:03d}_{cam_idx}.png"))
+                            semantic_mask_pil = Image.open(os.path.join(data_root, "panoptic", "semantic_mask", f"{t+start_time:03d}_{cam_idx}.png"))
                             semantic_mask_pil = semantic_mask_pil.resize(load_size[::-1], Image.NEAREST)
                             semantic_mask = np.array(semantic_mask_pil)
-                            instance_mask_pil = Image.open(os.path.join(data_root, "panoptic", "instance_mask", f"{t:03d}_{cam_idx}.png"))
+                            instance_mask_pil = Image.open(os.path.join(data_root, "panoptic", "instance_mask", f"{t+start_time:03d}_{cam_idx}.png"))
                             instance_mask_pil = instance_mask_pil.resize(load_size[::-1], Image.NEAREST)
                             instance_mask = np.array(instance_mask_pil)
                             semantic_masks.append(semantic_mask_pil)
@@ -886,7 +886,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                         
                         thing_masks.append(thing_mask)
                         
-                        image = Image.open(os.path.join(data_root, "images", f"{t:03d}_{cam_idx}.jpg"))
+                        image = Image.open(os.path.join(data_root, "images", f"{t+start_time:03d}_{cam_idx}.jpg"))
                         image = image.resize(load_size[::-1], Image.NEAREST)
                         image = np.array(image) / 255
                         dynamic_point_mask = np.zeros([lidar_points.shape[0]])
@@ -993,7 +993,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                         vis_mask[pixel_points_mask1] = (vis_mask[pixel_points_mask1] > 0) & (vehicle_moving_mask == 0)
                         dynamic_mask_seman_list.append(dynamic_mask)
                     
-                    def icp_registration(source, target, init_pose, max_correspondence_distance=0.2):
+                    def icp_registration(source, target, init_pose, max_correspondence_distance):
                         """使用ICP进行点云配准"""
                         source_pcd = o3d.geometry.PointCloud()
                         source_pcd.points = o3d.utility.Vector3dVector(source)
@@ -1006,7 +1006,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                             init=init_pose,
                             estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint())
                         
-                        return reg_p2p.transformation
+                        return reg_p2p
                     
 
                     def box_size_crop(pc, size, center=None):
@@ -1019,7 +1019,7 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                         return in_mask
 
                     # ASSOCIATE TRACKING RESULT IN 3 FRAMES & INIT VEHICLE POINT CLOUD 
-                    vehicle_pcd_save_dir = os.path.join(data_root, 'vehicle_pcd')
+                    vehicle_pcd_save_dir = os.path.join(data_root, f'vehicle_pcd_{start_time}_{end_time}')
                     os.makedirs(vehicle_pcd_save_dir, exist_ok=True)
                     pred_boxes = {}
                     if not args.load_gt_bbox:
@@ -1127,7 +1127,10 @@ def readWaymoInfo(path, white_background, eval, extension=".png", use_bg_gs=Fals
                                 init_pose = np.eye(4)
                                 init_pose[:3,:3] = prev_rot
                                 init_pose[:3, 3] = (np.median(curr_vehicle_points, 0) - np.median(canonical_model, 0)).T
-                                pose_t = icp_registration(canonical_model, curr_vehicle_points, init_pose, max_correspondence_distance=args.icp_corr_dist)
+                                reg_p2p = icp_registration(canonical_model, curr_vehicle_points, init_pose, max_correspondence_distance=args.icp_corr_dist)
+                                if reg_p2p.fitness < args.icp_fitness:
+                                    continue
+                                pose_t = reg_p2p.transformation
                                 if np.isnan(pose_t).any():
                                     pose_t = init_pose
                                 rel_box = \

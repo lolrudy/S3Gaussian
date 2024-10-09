@@ -43,6 +43,7 @@ class Deformation(nn.Module):
                                         nn.Linear(self.W,self.W),nn.ReLU(),nn.Linear(self.W, self.motion_basis_num * 3))
         
         self.ratio=0
+        self.detach_x_for_dx = args.detach_x_for_dx
         self.create_net()
     @property
     def get_aabb(self):
@@ -106,15 +107,15 @@ class Deformation(nn.Module):
     def get_empty_ratio(self):
         return self.ratio
     
-    def forward_motion(self, rays_pts_emb, time_emb):
-        hidden = self.query_time(rays_pts_emb, None, None, None, time_emb)
-        dx = self.pos_deform(hidden) 
-        dx[:,2] = 0
-        # grid_feature = self.grid(rays_pts_emb[:,:3])
-        # motion_basis = self.motion_basis_mlp(time_emb[0])
-        # weights = self.motion_mlp(grid_feature)
-        # dx = torch.mm(weights, motion_basis.reshape(self.motion_basis_num, 3))
-        return dx
+    # def forward_motion(self, rays_pts_emb, time_emb):
+    #     hidden = self.query_time(rays_pts_emb, None, None, None, time_emb)
+    #     dx = self.pos_deform(hidden) 
+    #     dx[:,2] = 0
+    #     # grid_feature = self.grid(rays_pts_emb[:,:3])
+    #     # motion_basis = self.motion_basis_mlp(time_emb[0])
+    #     # weights = self.motion_mlp(grid_feature)
+    #     # dx = torch.mm(weights, motion_basis.reshape(self.motion_basis_num, 3))
+    #     return dx
     
     def forward(self, rays_pts_emb, scales_emb=None, rotations_emb=None, opacity = None,shs_emb=None, time_feature=None, time_emb=None, mask=None):
         if time_emb is None:
@@ -129,7 +130,11 @@ class Deformation(nn.Module):
     
     def forward_dynamic(self,rays_pts_emb, scales_emb, rotations_emb, opacity_emb, shs_emb, time_feature, time_emb, mask):
         # TODO: 这个hidden 应该考虑前后t
-        hidden = self.query_time(rays_pts_emb, scales_emb, rotations_emb, time_feature, time_emb)
+        if self.detach_x_for_dx:
+            hidden = self.query_time(rays_pts_emb.detach(), scales_emb.detach(), rotations_emb.detach(), time_feature, time_emb)
+        else:
+            hidden = self.query_time(rays_pts_emb, scales_emb, rotations_emb, time_feature, time_emb)
+
         # TODO: 这里需要重新考虑，如何得到静态的mask
         if mask is None:
             if self.args.static_mlp:

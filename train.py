@@ -247,6 +247,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         if stage in checkpoint: 
             (model_params, first_iter) = torch.load(checkpoint)
             gaussians.restore(model_params, opt)
+            first_iter = 0
 
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
@@ -301,14 +302,17 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         train_cams = [c for c in train_cams if c.clip_id == clip_id]
 
     # incrementally add viewpoints to the stack
-    viewpoint_stack = train_cams
-    original_viewpoint_stack = copy.deepcopy(viewpoint_stack)
-    
+    original_viewpoint_stack = copy.deepcopy(train_cams)
+
     # warm up
-    viewnum_per_clip = opt.warmup_clip_interval * opt.viewpoint_num
-    viewpoint_stack = train_cams[:viewnum_per_clip]
-    clip_num = (len(train_cams) - 1) // viewnum_per_clip + 1
-    warmup_iter = clip_num * opt.warmup_iter_per_clip
+    if opt.warmup_clip_interval > 0 and clip_id is not None:
+        viewnum_per_clip = opt.warmup_clip_interval * opt.viewpoint_num
+        viewpoint_stack = original_viewpoint_stack.copy()[:viewnum_per_clip]
+        clip_num = (len(train_cams) - 1) // viewnum_per_clip + 1
+        warmup_iter = clip_num * opt.warmup_iter_per_clip
+    else:
+        viewpoint_stack = original_viewpoint_stack.copy()
+        warmup_iter = -1
 
 
     batch_size = opt.batch_size
@@ -427,46 +431,12 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         loss = Ll1 + depth_loss
         loss_dict = {'RGB_L1': Ll1, 'depth': depth_loss}
 
-        # dx loss
-        if 'fine' in stage and not args.no_dx and opt.lambda_dx !=0:
-            dx_abs = torch.abs(render_pkg['dx'])
-            dx_loss = torch.mean(dx_abs) * opt.lambda_dx
-            loss_dict['dx'] = dx_loss
-            loss += dx_loss
-        if 'fine' in stage and not args.no_dshs and opt.lambda_dshs != 0:
-            dshs_abs = torch.abs(render_pkg['dshs'])
-            dshs_loss = torch.mean(dshs_abs) * opt.lambda_dshs
-            loss_dict['dsh'] = dshs_loss
-            loss += dshs_loss            
-        if stage == "fine" and hyper.time_smoothness_weight != 0:
-            # tv_loss = 0
-            tv_loss = gaussians.compute_regulation(hyper.time_smoothness_weight, hyper.l1_time_planes, hyper.plane_tv_weight)
-            loss_dict['tv'] = tv_loss
-            loss += tv_loss
-        
         # DEACTIVATE SSIM LOSS WHILE COARSE STAGE
         if opt.lambda_dssim != 0 and 'fine' in stage:
             ssim_loss = ssim(image_tensor,gt_image_tensor)
             loss_dict['ssim'] = ssim_loss
             loss += opt.lambda_dssim * (1.0-ssim_loss)
             
-        if args.split_dynamic and opt.lambda_dyn_acc > 0. and 'fine' in stage and iteration > 10000:
-            object_acc = torch.clamp(render_pkg['dynamic_acc'], min=1e-5, max=1-1e-5)
-            dynamic_mask = viewpoint_cam.dynamic_mask_seman.to(object_acc.device).float()
-            acc_loss = opt.lambda_dyn_acc * \
-            -(dynamic_mask*torch.log(object_acc) + (1. - dynamic_mask)*torch.log(1. - object_acc)).mean()
-            # acc_loss = opt.lambda_dyn_acc * \
-            # -((1. - dynamic_mask)*torch.log(1. - object_acc)).mean()
-            loss_dict['dyn_acc'] = acc_loss
-            loss += acc_loss
-        else:
-            acc_loss = 0.
-            
-        if args.split_dynamic and opt.lambda_flat_reg > 0.:
-            flat_reg_loss = opt.lambda_flat_reg *  gaussians.compute_flat_regulation()
-            loss_dict['flat_reg_loss'] = flat_reg_loss
-            loss += flat_reg_loss
-    
         if args.split_dynamic and opt.lambda_seman_rgb > 0.:
             assert batch_size == 1
             semantic_mask = viewpoint_cam.semantic_mask
@@ -512,6 +482,41 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             loss_dict['seman_loss'] = sum(seman_loss.values())
             loss += loss_dict['seman_loss']
             
+        reg_loss = 0
+        # dx loss
+        if 'fine' in stage and not args.no_dx and opt.lambda_dx !=0:
+            dx_abs = torch.abs(render_pkg['dx'])
+            dx_loss = torch.mean(dx_abs) * opt.lambda_dx
+            loss_dict['dx'] = dx_loss
+            reg_loss += dx_loss
+        if 'fine' in stage and not args.no_dshs and opt.lambda_dshs != 0:
+            dshs_abs = torch.abs(render_pkg['dshs'])
+            dshs_loss = torch.mean(dshs_abs) * opt.lambda_dshs
+            loss_dict['dsh'] = dshs_loss
+            reg_loss += dshs_loss            
+        if stage == "fine" and hyper.time_smoothness_weight != 0:
+            # tv_loss = 0
+            tv_loss = gaussians.compute_regulation(hyper.time_smoothness_weight, hyper.l1_time_planes, hyper.plane_tv_weight)
+            loss_dict['tv'] = tv_loss
+            reg_loss += tv_loss
+            
+        if args.split_dynamic and opt.lambda_dyn_acc > 0. and 'fine' in stage and iteration > 10000:
+            object_acc = torch.clamp(render_pkg['dynamic_acc'], min=1e-5, max=1-1e-5)
+            dynamic_mask = viewpoint_cam.dynamic_mask_seman.to(object_acc.device).float()
+            acc_loss = opt.lambda_dyn_acc * \
+            -(dynamic_mask*torch.log(object_acc) + (1. - dynamic_mask)*torch.log(1. - object_acc)).mean()
+            # acc_loss = opt.lambda_dyn_acc * \
+            # -((1. - dynamic_mask)*torch.log(1. - object_acc)).mean()
+            loss_dict['dyn_acc'] = acc_loss
+            reg_loss += acc_loss
+        else:
+            acc_loss = 0.
+            
+        if args.split_dynamic and opt.lambda_flat_reg > 0.:
+            flat_reg_loss = opt.lambda_flat_reg *  gaussians.compute_flat_regulation()
+            loss_dict['flat_reg_loss'] = flat_reg_loss
+            reg_loss += flat_reg_loss
+            
         if args.split_dynamic and opt.lambda_vehicle_dx > 0. and 'fine' in stage and iteration < opt.vehicle_dx_reg_iter:
             if args.load_gt_bbox:
                 gt_bboxes = viewpoint_cam.gt_bboxes
@@ -537,27 +542,24 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                             delta_trans = box['translation']
                             vehicle_dx_loss[box['gid']] = l1_loss(dx[point_mask], delta_trans.cuda())
             loss_dict['vehicle_dx_loss'] = opt.lambda_vehicle_dx * sum(vehicle_dx_loss.values())
-            loss += loss_dict['vehicle_dx_loss']
+            reg_loss += loss_dict['vehicle_dx_loss']
 
 
-        if stage == 'fine' and args.feat_head:
-            feat = render_pkg['feat'].to('cuda') # [3,640,960]
-            gt_feat = viewpoint_cam.feat_map.permute(2,0,1).to('cuda')
-            loss_feat = l2_loss(feat, gt_feat) * opt.lambda_feat
-            loss += loss_feat
-            
         # if opt.lambda_lpips !=0:
         #     lpipsloss = lpips_loss(image_tensor,gt_image_tensor,lpips_model)
         #     loss += opt.lambda_lpips * lpipsloss
-        
-        loss.backward()
-        if torch.isnan(loss).any():
-            print("loss is nan, end training, reexecv program now.")
+            
+        if torch.isnan(loss).any() or torch.isnan(reg_loss).any():
+            print("loss is nan, end training.")
             sys.exit(-1)
-            os.execv(sys.executable, [sys.executable] + sys.argv)
+            # os.execv(sys.executable, [sys.executable] + sys.argv)
+        
+        loss += reg_loss
+        loss.backward(retain_graph=False)
         viewspace_point_tensor_grad = torch.zeros_like(viewspace_point_tensor)
         for idx in range(0, len(viewspace_point_tensor_list)):
             viewspace_point_tensor_grad = viewspace_point_tensor_grad + viewspace_point_tensor_list[idx].grad
+            
         iter_end.record()
 
         with torch.no_grad():
@@ -568,14 +570,6 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
             ema_acc_loss_for_log = 0.4 * reg_loss.item() + 0.6 * ema_acc_loss_for_log
             total_point = gaussians._xyz.shape[0]
             if iteration % 100 == 0:
-                # dynamic_points = 0
-                # dynamic_points_large_motion = 0
-                # if 'fine' in stage and not args.no_dx:
-                #     dx_abs = torch.abs(render_pkg['dx']) # [N,3]
-                #     max_values = torch.max(dx_abs, dim=1)[0] # [N]
-                #     thre = torch.mean(max_values)                    
-                #     mask = (max_values > thre)
-                #     dynamic_points_large_motion = torch.sum(mask).item()
                 dynamic_points = gaussians._deformation_table.sum().item()
 
                 print_dict = {
@@ -599,7 +593,8 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
 
             # Log and save
             timer.pause()
-            training_report(tb_writer, iteration, loss_dict, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, [pipe, background], stage)
+            training_report(tb_writer, iteration, loss_dict, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, [pipe, background], stage,
+                            f"clip_{clip_id}" if clip_id is not None else "full")
             # if (iteration in saving_iterations):
             #     print("\n[ITER {}] Saving Gaussians".format(iteration))
             #     scene.save(iteration, stage)
@@ -679,7 +674,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                     opacity_threshold = opt.opacity_threshold_fine_init - iteration*(opt.opacity_threshold_fine_init - opt.opacity_threshold_fine_after)/(opt.densify_until_iter)  
                     densify_threshold = opt.densify_grad_threshold_fine_init - iteration*(opt.densify_grad_threshold_fine_init - opt.densify_grad_threshold_after)/(opt.densify_until_iter )  
 
-                # remove invisible point
+                # remove invisible point, no remove when using warmup
                 if iteration == opt.remove_interval and 'coarse' in stage and iteration > warmup_iter:
                     print("remove invisible point")
                     remove_point = True
@@ -695,8 +690,8 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                 
                 if  (~remove_point) and iteration > opt.pruning_from_iter and iteration % opt.pruning_interval == 0 :
                     # TODO SAVE DYNAMIC POINT BEFORE RUNING
-                    # size_threshold = 20 if iteration > opt.opacity_reset_interval else None
-                    size_threshold = None
+                    size_threshold = opt.prune_size_threshold if iteration > opt.opacity_reset_interval and opt.prune_size_threshold > 0 else None
+                    # size_threshold = None
                     # opacity_threshold = 0.011 if iteration % opt.opacity_reset_interval == 0 else opacity_threshold
                     gaussians.prune(densify_threshold, opacity_threshold, scene.cameras_extent, size_threshold, 
                                     prune_dynamic='fine' in stage and iteration > opt.prune_dynamic_iteration)
@@ -787,12 +782,12 @@ def prepare_output_and_logger(expname):
         print("Tensorboard not available: not logging progress")
     return tb_writer
 
-def training_report(tb_writer, iteration, loss_dict, loss, l1_loss, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs, stage):
+def training_report(tb_writer, iteration, loss_dict, loss, l1_loss, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs, stage, clip_name):
     if tb_writer:
-        tb_writer.add_scalar(f'{stage}/train_loss_patches/total_loss', loss.item(), iteration)
+        tb_writer.add_scalar(f'{clip_name}/{stage}/train_loss_patches/total_loss', loss.item(), iteration)
         for loss_name, loss_value in loss_dict.items():
             if loss_value > 0:
-                tb_writer.add_scalar(f'{stage}/train_loss_patches/{loss_name}', loss_value.item(), iteration)
+                tb_writer.add_scalar(f'{clip_name}/{stage}/train_loss_patches/{loss_name}', loss_value.item(), iteration)
         # tb_writer.add_scalar(f'{stage}/iter_time', elapsed, iteration)
         
     

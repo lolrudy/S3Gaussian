@@ -1,2 +1,5 @@
 data/
 work_dirs/
+*.pyc
+*.png
+*.jpg

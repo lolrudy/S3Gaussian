@@ -93,9 +93,11 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         
         means3D_final, scales_final, rotations_final, opacity_final, shs_final = means3D.clone(), scales.clone(), rotations.clone(), opacity.clone(), shs.clone()
         # dx = pc._deformation.forward_motion(means3D[deformation_point], time[deformation_point])
-        means3D_deform, scales_deform, rotations_deform, opacity_deform, shs_deform, dx, feat, dshs, ds, dr, do = pc._deformation(means3D[deformation_point], scales[deformation_point], 
-                                                                         rotations[deformation_point], opacity[deformation_point], shs[deformation_point],
-                                                                         time[deformation_point])
+        # TODO DETACH ALL POINTS
+        means3D_deform, scales_deform, rotations_deform, opacity_deform, shs_deform, dx, feat, dshs, ds, dr, do = \
+            pc._deformation(means3D[deformation_point], scales[deformation_point], 
+                            rotations[deformation_point], opacity[deformation_point], shs[deformation_point],
+                            time[deformation_point])
         means3D_final[deformation_point] = means3D_deform
         scales_final[deformation_point] = scales_deform
         rotations_final[deformation_point] = rotations_deform
